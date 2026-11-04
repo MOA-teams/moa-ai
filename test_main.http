@@ -1,9 +1,6 @@
 ### Liveness (backend: 8000, AI: 8001)
 GET http://localhost:8001/health
 
-### PostgreSQL readiness
-GET http://localhost:8001/health/ready
-
 ### Internal API contract (501 until pipeline implementation)
 # Set service_token in your local HTTP client; do not commit credentials.
 POST http://localhost:8001/internal/v1/pipeline-runs

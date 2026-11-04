@@ -1,5 +1,10 @@
 # 백엔드 연결 기준
 
+PostgreSQL 구축·테이블·마이그레이션·영속 데이터 관리는 백엔드 담당입니다.
+AI 서비스는 분석 요청을 받아 결과를 반환하며 DB를 직접 생성하거나 변경하지 않습니다.
+실행 상태·멱등키 등의 영속 저장은 백엔드 담당이 제공하는 계약에 연결하며, 없는 저장 API를 가정해서 호출하지 않습니다.
+벡터 DB 선택과 RAG 인터페이스는 AI 담당 범위로 유지합니다.
+
 참조 저장소: https://github.com/MOA-teams/moa-backend
 인터페이스 규칙은 v0.3 snapshot을 `InterfaceRule.md`로 보존합니다. snapshot 파일의 내용을 AI 구현 완료로 해석하지 않습니다.
 초기 프로젝트에서 실제 제공하는 동작/미구현 상태는 README와 OpenAPI를 확인합니다.
@@ -30,7 +35,6 @@ AI 서비스는 고객 메시지를 직접 발송하지 않으므로 이 차이�
 | app/services/llm | Gemini 제공자 어댑터 |
 | app/services/rag | 청크·임베딩·검색·벡터 저장소 어댑터 |
 | app/services/backend_client.py | 서버 설정 주소로 결과 콜백 |
-| app/db | AI 실행/소스 메타데이터. 백엔드 테이블 직접 접근 금지 |
 | app/workers | durable 실행·재시도·복구 구현 진입점 |
 
 공통 실패 형식은 error.code/error.message. 입력 검증 오류에는 고객 원문/토큰을 그대로 반환하지 않습니다.
