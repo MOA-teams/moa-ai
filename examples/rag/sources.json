@@ -1,0 +1,42 @@
+[
+  {
+    "tenant_id": "syncnote",
+    "source_type": "문서",
+    "source_id": "DOC-005",
+    "version": 1,
+    "source_revision": 1,
+    "title": "오류 코드 안내 (검색 테스트용)",
+    "text": "E-502는 노트 저장 처리 중 발생하는 오류입니다. 문의 시 오류가 발생한 시각과 앱 버전을 함께 확인합니다.",
+    "visibility": "고객 공개",
+    "status": "유효",
+    "review_required": false,
+    "content_hash": "sha256:709f2229d5d6c7fa1cbd80b571d4aa0fd0673af54b42aac3b0a3bff7652f81d2",
+    "metadata": {
+      "doc_type": "FAQ"
+    },
+    "evidence": {
+      "docs": [],
+      "code": []
+    }
+  },
+  {
+    "tenant_id": "syncnote",
+    "source_type": "문서",
+    "source_id": "DOC-006",
+    "version": 1,
+    "source_revision": 1,
+    "title": "첨부 용량 안내 (검색 테스트용)",
+    "text": "E-413은 첨부 파일 크기가 허용 용량을 초과했을 때 표시됩니다. 저장 처리 오류 E-502와는 구분합니다.",
+    "visibility": "고객 공개",
+    "status": "유효",
+    "review_required": false,
+    "content_hash": "sha256:843df12aa655c092ee3c7e3151306de3ef4304806d22452f01dc6aa86789e6d9",
+    "metadata": {
+      "doc_type": "FAQ"
+    },
+    "evidence": {
+      "docs": [],
+      "code": []
+    }
+  }
+]

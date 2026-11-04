@@ -1,21 +1,36 @@
+from dataclasses import dataclass
 from typing import Protocol
 
-from app.core.errors import FeatureNotReady
-from app.schemas.rag import SourceInput
+from app.schemas.rag import (
+    SearchRequest,
+    SearchResult,
+    SourceInput,
+    SourceStatusBatch,
+    SourceStatusResult,
+    SourceView,
+    TextChunk,
+)
+
+
+@dataclass(frozen=True)
+class IndexTicket:
+    key: str
+    generation: str
+    source: SourceInput
+    chunks: list[TextChunk]
+    space: str
 
 
 class VectorStore(Protocol):
-    async def upsert(self, source: SourceInput) -> None: ...
-    async def search(self, *, tenant_id: str, query: str, top_k: int) -> list[dict]: ...
-    async def exclude(self, *, tenant_id: str, source_ids: list[str]) -> None: ...
+    """Synchronous storage operations are called in a thread by RagService."""
 
-
-class UnconfiguredVectorStore:
-    async def upsert(self, source: SourceInput) -> None:
-        raise FeatureNotReady("Vector store")
-
-    async def search(self, *, tenant_id: str, query: str, top_k: int) -> list[dict]:
-        raise FeatureNotReady("Vector store")
-
-    async def exclude(self, *, tenant_id: str, source_ids: list[str]) -> None:
-        raise FeatureNotReady("Vector store")
+    def prepare(
+        self, source: SourceInput, chunks: list[TextChunk], space: str
+    ) -> IndexTicket | None: ...
+    def complete(self, ticket: IndexTicket, vectors: list[list[float]]) -> bool: ...
+    def fail(self, ticket: IndexTicket, error: str) -> None: ...
+    def get(
+        self, tenant: str, source_type: str, source_id: str, version: int | str
+    ) -> SourceView: ...
+    def update_statuses(self, batch: SourceStatusBatch) -> SourceStatusResult: ...
+    def search(self, request: SearchRequest, vector: list[float], space: str) -> SearchResult: ...

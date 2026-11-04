@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from pydantic import BaseModel, SecretStr, ValidationError
+from pydantic import BaseModel, SecretStr
 
 from app.core.errors import ServiceError
 from app.schemas.common import ErrorDetail, RunStatus
@@ -44,7 +44,7 @@ async def test_gemini_uses_structured_output_and_closes_client(settings, monkeyp
     assert result.summary == "ok"
     assert seen["contents"] == "untrusted inquiry"
     assert seen["config"].system_instruction == "Follow system rules"
-    assert seen["config"].response_schema is Answer
+    assert seen["config"].response_json_schema == Answer.model_json_schema()
     assert seen["closed"]
 
 
@@ -73,8 +73,9 @@ async def test_gemini_validates_provider_output(settings, monkeypatch):
         "app.services.llm.gemini.genai.Client",
         lambda **kwargs: SimpleNamespace(aio=FakeClient()),
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(ServiceError) as exc:
         await GeminiLLM(settings).generate(instruction="rules", data="query", schema=Answer)
+    assert exc.value.code == "INVALID_LLM_RESPONSE"
 
 
 def failed_result():
@@ -116,3 +117,40 @@ async def test_callback_does_not_follow_redirect(settings):
         with pytest.raises(ServiceError):
             await BackendClient(settings).deliver(failed_result(), client)
     assert len(seen) == 1
+
+
+@pytest.mark.parametrize(
+    "status,expected",
+    [
+        (400, "GEMINI_REQUEST_REJECTED"),
+        (402, "GEMINI_CREDITS_DEPLETED"),
+        (429, "GEMINI_RATE_LIMITED"),
+        (403, "GEMINI_CONFIGURATION_ERROR"),
+        (404, "GEMINI_CONFIGURATION_ERROR"),
+        (500, "GEMINI_UNAVAILABLE"),
+    ],
+)
+async def test_gemini_errors_are_sanitized(settings, monkeypatch, status, expected):
+    from google.genai import errors
+
+    settings.gemini_api_key = SecretStr("sensitive-test-key")
+    settings.gemini_model = "test-model"
+
+    class FakeClient:
+        async def __aenter__(self):
+            self.models = self
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def generate_content(self, **kwargs):
+            raise errors.APIError(status, {"error": {"message": "sensitive-test-key"}})
+
+    monkeypatch.setattr(
+        "app.services.llm.gemini.genai.Client", lambda **kwargs: SimpleNamespace(aio=FakeClient())
+    )
+    with pytest.raises(ServiceError) as exc:
+        await GeminiLLM(settings).generate(instruction="rules", data="query", schema=Answer)
+    assert exc.value.code == expected
+    assert "sensitive-test-key" not in exc.value.message

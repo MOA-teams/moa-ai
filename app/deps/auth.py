@@ -12,7 +12,7 @@ bearer = HTTPBearer(auto_error=False)
 
 async def require_service_tenant(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
-    tenant_id: Annotated[str, Header(alias="X-Tenant-ID")],
+    tenant_id: Annotated[str, Header(alias="X-Tenant-ID", examples=["syncnote"])],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> str:
     expected = settings.internal_token.get_secret_value()

@@ -1,0 +1,22 @@
+{
+  "tenant_id": "syncnote",
+  "inquiry_id": "Q-1001",
+  "inquiry_revision": 1,
+  "based_on_message_id": "MSG-000001",
+  "customer_category": "기타",
+  "messages": [
+    {
+      "message_id": "MSG-000001",
+      "sender": "customer",
+      "text": "저장 버튼을 누르면 E502가 떠요.",
+      "sent_at": "2026-11-05T09:00:00+09:00",
+      "attachments": []
+    }
+  ],
+  "env": {
+    "os": null,
+    "app_version": null,
+    "error_code": null
+  },
+  "review_only": false
+}
