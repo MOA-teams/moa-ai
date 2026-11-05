@@ -5,7 +5,7 @@ import re
 from app.schemas.analysis import InquiryAnalysis
 from app.schemas.pipeline import PipelineRequest, SimilarInquiries, SimilarInquiry
 from app.schemas.rag import SearchHit, SearchRequest
-from app.services.pipeline.analyzer import CODE_PATTERN
+from app.services.pipeline.error_codes import extract_error_codes
 from app.services.rag.service import RagService
 
 INQUIRY_ID_PATTERN = re.compile(r"^Q-\d{4}$")
@@ -15,12 +15,8 @@ def _extract_codes(text: str, metadata: dict) -> set[str]:
     codes: set[str] = set()
     meta_code = metadata.get("normalized_error_code") or metadata.get("error_code")
     if isinstance(meta_code, str):
-        for match in CODE_PATTERN.finditer(meta_code):
-            area, digits = match.groups()
-            codes.add(f"E-{area.upper()}-{digits}" if area else f"E-{digits}")
-    for match in CODE_PATTERN.finditer(text):
-        area, digits = match.groups()
-        codes.add(f"E-{area.upper()}-{digits}" if area else f"E-{digits}")
+        codes.update(extract_error_codes(meta_code, explicit_field=True))
+    codes.update(extract_error_codes(text))
     return codes
 
 

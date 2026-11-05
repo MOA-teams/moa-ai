@@ -12,7 +12,7 @@ from app.schemas.pipeline import Draft, PipelineRequest, StyleReference
 from app.schemas.rag import SearchHit, SearchResult
 from app.schemas.routing import ROUTING_POLICY, TeamRouting
 from app.services.llm.base import StructuredLLM
-from app.services.pipeline.analyzer import CODE_PATTERN
+from app.services.pipeline.error_codes import extract_error_codes
 from app.services.pipeline.grounding import document_map, verified_citations
 
 EVIDENCE_PROMPT = """
@@ -131,11 +131,7 @@ class ValidatedEvidence(ContractModel):
 
 
 def _extract_error_codes(text: str) -> set[str]:
-    codes: set[str] = set()
-    for match in CODE_PATTERN.finditer(text):
-        area, digits = match.groups()
-        codes.add(f"E-{area.upper()}-{digits}" if area else f"E-{digits}")
-    return codes
+    return extract_error_codes(text)
 
 
 class EvidenceValidator:

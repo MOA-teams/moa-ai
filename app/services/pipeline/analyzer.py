@@ -1,5 +1,4 @@
 import json
-import re
 
 from pydantic import ValidationError
 
@@ -10,23 +9,18 @@ from app.schemas.pipeline import PipelineRequest
 from app.schemas.routing import ROUTING_POLICY
 from app.services.llm.base import StructuredLLM
 from app.services.pipeline.analysis_prompt import ANALYSIS_INSTRUCTION
+from app.services.pipeline.error_codes import extract_error_codes, resolve_reported_code
 
-CODE_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9])E[\s-]*(?:([A-Za-z]+)[\s-]*)?(\d{2,3})(?![A-Za-z0-9])",
-    re.IGNORECASE,
-)
 ATTACHMENT_LIMITATION = "첨부 이미지·PDF 내용은 이번 단계에서 분석하지 않았습니다."
 
 
 def observed_error_codes(request: PipelineRequest) -> set[str]:
     texts = [message.text for message in request.messages if message.sender == Sender.CUSTOMER]
-    if request.env.error_code:
-        texts.append(request.env.error_code)
     codes: set[str] = set()
     for text in texts:
-        for match in CODE_PATTERN.finditer(text):
-            area, digits = match.groups()
-            codes.add(f"E-{area.upper()}-{digits}" if area else f"E-{digits}")
+        codes.update(extract_error_codes(text))
+    if request.env.error_code:
+        codes.update(extract_error_codes(request.env.error_code, explicit_field=True))
     return codes
 
 
@@ -48,6 +42,7 @@ class InquiryAnalyzer:
                 for message in request.messages
             ],
             "env": request.env.model_dump(mode="json"),
+            "reported_error_codes": sorted(observed_error_codes(request)),
         }
         data = json.dumps(context, ensure_ascii=False)
         if len(data) > self.max_input_chars:
@@ -66,16 +61,16 @@ class InquiryAnalyzer:
                 502, "INVALID_ANALYSIS_RESPONSE", "Invalid analysis structure"
             ) from exc
         if result.normalized_error_code is not None:
-            match = CODE_PATTERN.fullmatch(result.normalized_error_code.strip())
-            normalized = None
-            if match:
-                area, digits = match.groups()
-                normalized = f"E-{area.upper()}-{digits}" if area else f"E-{digits}"
-            if normalized is None or normalized not in observed_error_codes(request):
+            normalized = resolve_reported_code(
+                result.normalized_error_code, observed_error_codes(request)
+            )
+            if normalized is None:
                 raise ServiceError(
                     502, "UNGROUNDED_ERROR_CODE", "Analysis contained an unreported error code"
                 )
             result.normalized_error_code = normalized
+            if result.search_query and normalized not in result.search_query:
+                result.search_query = f"{result.search_query} {normalized}"[:1000]
 
         if result.normalized_error_code is not None and result.needs_more_info and result.symptoms:
             result = result.model_copy(

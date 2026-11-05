@@ -1,5 +1,6 @@
 """문의 분석부터 별도 검수까지 단계를 순서대로 실행하고 공통 결과로 반환한다."""
 
+import logging
 from collections.abc import Callable
 
 from app.core.errors import ServiceError
@@ -16,6 +17,8 @@ from app.services.pipeline.search import evidence_search_request
 from app.services.pipeline.similar import SimilarInquiryFinder
 from app.services.pipeline.stages import PipelineStage
 from app.services.rag.service import RagService
+
+logger = logging.getLogger(__name__)
 
 RETRYABLE_ERROR_CODES = {
     "LLM_UNAVAILABLE",
@@ -56,7 +59,11 @@ class PipelineOrchestrator:
         precomputed_analysis: InquiryAnalysis | None = None,
         precomputed_retrieval: SearchResult | None = None,
     ) -> PipelineResult:
+        current_stage: PipelineStage | None = None
+
         def report_stage(stage: PipelineStage) -> None:
+            nonlocal current_stage
+            current_stage = stage
             if on_stage is not None:
                 on_stage(stage)
 
@@ -81,6 +88,7 @@ class PipelineOrchestrator:
                 normalized_error_code=inquiry_analysis.normalized_error_code,
                 missing_fields=inquiry_analysis.missing_fields,
             )
+            result = result.model_copy(update={"analysis": projected_analysis})
 
             # Stage 2: 정보 부족 판단
             report_stage(PipelineStage.CHECK_INFORMATION)
@@ -118,6 +126,12 @@ class PipelineOrchestrator:
                 retrieval = await self.rag.search(
                     evidence_search_request(request, inquiry_analysis, min_score=self.min_score)
                 )
+            result = result.model_copy(
+                update={
+                    "knowledge_revision": retrieval.knowledge_revision,
+                    "similar_inquiries": similar_inquiries,
+                }
+            )
 
             # Stage 5: 근거 검증
             report_stage(PipelineStage.VALIDATE_EVIDENCE)
@@ -230,10 +244,14 @@ class PipelineOrchestrator:
                 )
             )
         except ServiceError as exc:
+            logger.warning(
+                "Pipeline failed run=%s stage=%s code=%s", run_id, current_stage, exc.code
+            )
             retryable = exc.code in RETRYABLE_ERROR_CODES
             return result.model_copy(
                 update=dict(
                     run_status=RunStatus.FAILED,
+                    current_stage=current_stage.value if current_stage else None,
                     error=ErrorDetail(
                         code=exc.code,
                         message=exc.message,
@@ -241,10 +259,15 @@ class PipelineOrchestrator:
                     ),
                 )
             )
-        except Exception:
+        except Exception as exc:
+            # Never log exception messages/tracebacks containing customer or source text.
+            logger.error(
+                "Pipeline failed run=%s stage=%s type=%s", run_id, current_stage, type(exc).__name__
+            )
             return result.model_copy(
                 update=dict(
                     run_status=RunStatus.FAILED,
+                    current_stage=current_stage.value if current_stage else None,
                     error=ErrorDetail(
                         code="PIPELINE_EXECUTION_ERROR",
                         message="파이프라인 실행 중 오류가 발생했습니다.",
