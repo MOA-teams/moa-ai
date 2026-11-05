@@ -1,0 +1,36 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    concurrency: deploy-production-ai
+    steps:
+      - name: Deploy over SSH
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          # 붙여넣기 과정에서 섞인 공백/줄바꿈/따옴표 제거
+          SSH_HOST=$(printf '%s' "$SSH_HOST" | tr -d '[:space:]"'"'")
+          SSH_USER=$(printf '%s' "$SSH_USER" | tr -d '[:space:]"'"'")
+          if [ -z "$SSH_HOST" ] || [ -z "$SSH_USER" ] || [ -z "$SSH_KEY" ]; then
+            echo "SSH_HOST / SSH_USER / SSH_KEY secret 중 비어 있는 값이 있습니다." >&2
+            exit 1
+          fi
+          if [ -z "$ENV_FILE" ]; then
+            echo "ENV_FILE secret이 비어 있습니다." >&2
+            exit 1
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts
+          # .env 내용은 stdin으로만 전달해 커맨드라인/로그 노출을 피한다.
+          printf '%s' "$ENV_FILE" | ssh -i ~/.ssh/deploy_key "$SSH_USER@$SSH_HOST" \
+            'bash ~/moa-ai/scripts/deploy.sh'
