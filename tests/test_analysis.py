@@ -400,3 +400,25 @@ async def test_unfamiliar_support_question_is_not_forced_out_of_scope(pipeline_r
     llm = StubLLM(searchable_result(normalized_error_code=None, inquiry_intent="support"))
     result = await InquiryAnalyzer(llm).analyze(PipelineRequest.model_validate(pipeline_request))
     assert not result.needs_more_info and result.search_query
+
+
+def test_internal_recovery_flag_is_not_exposed_to_model_schema():
+    assert "requires_manual_review" not in InquiryAnalysis.model_json_schema()["properties"]
+
+
+@pytest.mark.parametrize("intent", ["clarify", "out_of_scope"])
+async def test_model_cannot_force_handoff_instead_of_reconfirmation(pipeline_request, intent):
+    llm = StubLLM(
+        searchable_result(
+            normalized_error_code=None,
+            inquiry_intent=intent,
+            requires_manual_review=True,
+        )
+    )
+    req = PipelineRequest.model_validate(pipeline_request)
+    analysis = await InquiryAnalyzer(llm).analyze(req)
+    assert not analysis.requires_manual_review
+    result = await PipelineOrchestrator(analyzer=InquiryAnalyzer(llm)).execute(req)
+    assert result.run_status.value == "완료"
+    assert result.draft_result.value == "추가 질문 필요"
+    assert result.additional_question and result.draft is None

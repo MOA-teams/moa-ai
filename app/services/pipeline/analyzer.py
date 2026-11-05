@@ -142,6 +142,10 @@ class InquiryAnalyzer:
                 schema=InquiryAnalysis,
             )
             result = InquiryAnalysis.model_validate(output.model_dump())
+            # Only our exhausted-recovery path may bypass the clarification stage.
+            # A model-generated true value would otherwise send vague inquiries
+            # straight to an agent, even with a valid additional question.
+            result.requires_manual_review = False
         except ValidationError as exc:
             raise ServiceError(
                 502, "INVALID_ANALYSIS_RESPONSE", "Invalid analysis structure"

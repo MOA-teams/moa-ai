@@ -1,6 +1,7 @@
 from typing import Literal, Self
 
 from pydantic import Field, field_validator, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 from app.schemas.common import ContractModel
 from app.schemas.pipeline import Analysis
@@ -47,7 +48,8 @@ class InquiryAnalysis(Analysis):
     routing: TeamRouting | None = None
     has_action_context: bool | None = None
     context_evidence: str | None = Field(default=None, max_length=1000)
-    requires_manual_review: bool = False
+    # Internal recovery decision, not a field the model is allowed to decide.
+    requires_manual_review: SkipJsonSchema[bool] = False
     inquiry_intent: Literal["support", "clarify", "out_of_scope"] = "support"
 
     @field_validator("missing_fields", mode="before")
