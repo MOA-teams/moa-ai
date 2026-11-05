@@ -40,7 +40,7 @@ def clarification_fallback() -> InquiryAnalysis:
         summary="문의 내용을 안정적으로 해석하지 못해 추가 설명이 필요합니다.",
         normalized_error_code=None,
         symptoms=[],
-        missing_fields=["발생 화면", "재현 단계"],
+        missing_fields=["문의 내용"],
         needs_more_info=True,
         additional_question="어떤 화면에서 무엇을 하려던 상황인지 글로 설명해 주시겠어요?",
         search_query=None,
@@ -118,6 +118,17 @@ class InquiryAnalyzer:
                 result.limitations.append(
                     "후속 대화 해석을 검증하지 못해 반복 질문 대신 담당자 확인이 필요합니다."
                 )
+        if result.inquiry_intent in {"clarify", "out_of_scope"}:
+            result = result.model_copy(
+                update={
+                    "needs_more_info": True,
+                    "missing_fields": ["문의 내용"],
+                    "additional_question": (
+                        "서비스와 관련해 어떤 도움이 필요한지 구체적으로 알려주시겠어요?"
+                    ),
+                    "search_query": None,
+                }
+            )
         if any(message.attachments for message in request.messages):
             if ATTACHMENT_LIMITATION not in result.limitations:
                 result.limitations.append(ATTACHMENT_LIMITATION)

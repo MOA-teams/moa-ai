@@ -6,7 +6,7 @@ from app.schemas.common import ContractModel
 from app.schemas.pipeline import Analysis
 from app.schemas.routing import TeamRouting
 
-MissingField = Literal["발생 화면", "재현 단계", "발생 환경", "앱 버전", "오류 코드"]
+MissingField = Literal["문의 내용", "발생 화면", "재현 단계", "발생 환경", "앱 버전", "오류 코드"]
 MISSING_FIELD_ALIASES = {
     "구체적인 기능/화면": "발생 화면",
     "기능/화면": "발생 화면",
@@ -48,6 +48,7 @@ class InquiryAnalysis(Analysis):
     has_action_context: bool | None = None
     context_evidence: str | None = Field(default=None, max_length=1000)
     requires_manual_review: bool = False
+    inquiry_intent: Literal["support", "clarify", "out_of_scope"] = "support"
 
     @field_validator("missing_fields", mode="before")
     @classmethod

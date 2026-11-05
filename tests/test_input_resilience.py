@@ -72,7 +72,7 @@ async def test_unusable_outputs_become_question_without_search(pipeline_request,
     assert result.draft is None and result.knowledge_revision is None
     assert result.analysis.normalized_error_code is None
     assert result.routing.team == "판단 보류"
-    assert set(result.analysis.missing_fields) <= {"발생 화면", "재현 단계"}
+    assert result.analysis.missing_fields == ["문의 내용"]
 
 
 async def test_fallback_does_not_claim_to_read_attachments(pipeline_request):

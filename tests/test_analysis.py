@@ -381,3 +381,22 @@ async def test_prior_customer_action_context_is_reused_in_followup(pipeline_requ
         )
     ).analyze(PipelineRequest.model_validate(pipeline_request))
     assert not r.needs_more_info and r.search_query
+
+
+@pytest.mark.parametrize("intent", ["clarify", "out_of_scope"])
+async def test_nonsupport_intent_always_reconfirms_without_rag(pipeline_request, intent):
+    llm = StubLLM(searchable_result(normalized_error_code=None, inquiry_intent=intent))
+    req = PipelineRequest.model_validate(pipeline_request)
+    analysis = await InquiryAnalyzer(llm).analyze(req)
+    assert analysis.needs_more_info and analysis.missing_fields == ["문의 내용"]
+    assert analysis.search_query is None
+    result = await PipelineOrchestrator(analyzer=InquiryAnalyzer(llm)).execute(req)
+    assert result.draft_result.value == "추가 질문 필요"
+    assert result.draft is None and result.knowledge_revision is None
+    assert result.additional_question and "서비스" in result.additional_question
+
+
+async def test_unfamiliar_support_question_is_not_forced_out_of_scope(pipeline_request):
+    llm = StubLLM(searchable_result(normalized_error_code=None, inquiry_intent="support"))
+    result = await InquiryAnalyzer(llm).analyze(PipelineRequest.model_validate(pipeline_request))
+    assert not result.needs_more_info and result.search_query
