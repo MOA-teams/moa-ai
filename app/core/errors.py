@@ -10,11 +10,6 @@ class ServiceError(Exception):
         self.message = message
 
 
-class FeatureNotReady(ServiceError):
-    def __init__(self, feature: str):
-        super().__init__(501, "FEATURE_NOT_IMPLEMENTED", f"{feature} is not implemented yet")
-
-
 def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ServiceError)
     async def handle_service_error(request: Request, exc: ServiceError) -> JSONResponse:

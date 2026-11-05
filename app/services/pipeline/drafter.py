@@ -250,25 +250,28 @@ class EvidenceValidator:
             schema=EvidenceEvaluationOutput,
         )
 
-        selected = [
-            hit
-            for hit in public_facts
-            if not evaluation.selected_doc_ids or hit.source_id in set(evaluation.selected_doc_ids)
-        ]
-        if not selected:
-            selected = public_facts
-
+        selected = select_facts(public_facts, evaluation.selected_doc_ids)
         selected_source_ids = {hit.source_id for hit in selected}
         all_source_ids = {hit.source_id for hit in public_facts}
-        single_selected_from_many = (
-            bool(evaluation.selected_doc_ids)
-            and len(selected_source_ids) == 1
-            and len(all_source_ids) > 1
-        )
-        has_conflict = evaluation.has_conflict and not single_selected_from_many
-        sufficient_for_draft = evaluation.sufficient_for_draft or (
-            evaluation.relevant and single_selected_from_many and evaluation.has_conflict
-        )
+        if evaluation.has_conflict and selected_source_ids < all_source_ids:
+            # 무관한 문서의 충돌인지 추측해서 통과시키지 않고, 선택된 근거만 재검증한다.
+            followup_required = evaluation.requires_followup_check
+            selected_payload = {
+                **payload,
+                "facts": [
+                    item for item in payload["facts"] if item["source_id"] in selected_source_ids
+                ],
+            }
+            evaluation = await self.llm.generate(
+                instruction=EVIDENCE_PROMPT,
+                data=json.dumps(selected_payload, ensure_ascii=False),
+                schema=EvidenceEvaluationOutput,
+            )
+            evaluation.requires_followup_check |= followup_required
+            selected = select_facts(selected, evaluation.selected_doc_ids)
+
+        has_conflict = evaluation.has_conflict
+        sufficient_for_draft = evaluation.sufficient_for_draft
 
         if has_conflict:
             return ValidatedEvidence(
@@ -304,6 +307,14 @@ class EvidenceValidator:
             source_conflict=CheckStatus.PASS,
             reasons=evaluation.reasons,
         )
+
+
+def select_facts(facts: list[SearchHit], selected_ids: list[str]) -> list[SearchHit]:
+    """모델이 실제 검색 범위를 벗어난 근거를 선택하면 거절한다."""
+    ids = set(selected_ids)
+    if not ids <= {hit.source_id for hit in facts}:
+        raise ServiceError(502, "INVALID_EVIDENCE_SELECTION", "Selected evidence was not retrieved")
+    return [hit for hit in facts if not ids or hit.source_id in ids]
 
 
 class DraftGenerator:

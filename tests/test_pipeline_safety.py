@@ -357,13 +357,13 @@ async def test_unrelated_conflicting_documents_do_not_block_single_selected_evid
                 },
                 "limitations": [],
             },
-            EvidenceEvaluationOutput: {
+            EvidenceEvaluationOutput: lambda data: {
                 "relevant": True,
-                "has_conflict": True,
-                "sufficient_for_draft": False,
+                "has_conflict": "DOC-104" in data and "DOC-106" in data,
+                "sufficient_for_draft": "DOC-104" not in data,
                 "requires_followup_check": False,
                 "selected_doc_ids": ["DOC-101"],
-                "reasons": ["DOC-101로 충분하나 환불 문서 DOC-104와 DOC-106이 충돌함"],
+                "reasons": ["선택한 비밀번호 문서만 충돌 없이 사용"],
             },
             DraftGenerationOutput: {
                 "answer_text": "싱크노트 설정 > 계정 > 보안 > 비밀번호 변경에서 변경합니다.",
@@ -384,6 +384,52 @@ async def test_unrelated_conflicting_documents_do_not_block_single_selected_evid
     assert res.draft is not None
     assert [d.doc_id for d in res.draft.evidence.docs] == ["DOC-101"]
     assert res.verification.status == CheckStatus.PASS
+
+
+async def test_selected_single_document_conflict_still_blocks_draft(account_case):
+    from app.schemas.rag import SearchResult
+    from app.services.pipeline.drafter import EvidenceValidator
+
+    request, analysis, validated, _ = account_case
+    extra = validated.facts[0].model_copy(update={"source_id": "DOC-006"})
+    llm = SchemaDispatchLLM(
+        {
+            EvidenceEvaluationOutput: {
+                "relevant": True,
+                "has_conflict": True,
+                "sufficient_for_draft": False,
+                "selected_doc_ids": ["DOC-005"],
+            }
+        }
+    )
+    result = await EvidenceValidator(llm).validate(
+        request, analysis, SearchResult(knowledge_revision=1, facts=[*validated.facts, extra])
+    )
+    assert result.status == "conflict"
+    assert result.facts == []
+    assert len(llm.calls) == 2
+
+
+async def test_unknown_selected_evidence_is_not_replaced_with_all_facts(account_case):
+    from app.schemas.rag import SearchResult
+    from app.services.pipeline.drafter import EvidenceValidator
+
+    request, analysis, validated, _ = account_case
+    llm = SchemaDispatchLLM(
+        {
+            EvidenceEvaluationOutput: {
+                "relevant": True,
+                "has_conflict": False,
+                "sufficient_for_draft": True,
+                "selected_doc_ids": ["DOC-999"],
+            }
+        }
+    )
+    with pytest.raises(ServiceError) as error:
+        await EvidenceValidator(llm).validate(
+            request, analysis, SearchResult(knowledge_revision=1, facts=validated.facts)
+        )
+    assert error.value.code == "INVALID_EVIDENCE_SELECTION"
 
 
 async def test_orchestrator_regenerates_once_when_draft_adds_unsupported_procedure(

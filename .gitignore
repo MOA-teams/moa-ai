@@ -17,3 +17,5 @@ build/
 
 .data/
 *.pem
+*.key
+*.log

@@ -16,7 +16,7 @@ RAG 벡터 저장소는 Chroma로 결정했습니다. 검색용 청크·소스 �
 - `sent_at`은 타임존 필수. `customer_category`는 입력, AI category/urgency는 출력.
 - evidence는 docs[{doc_id,version}]/code[{path,commit_sha}] 형식.
 - customer_reaction, stale_*, expected_facts_after_change 등 정답은 서비스 입력 모델에 없음.
-- `seed/labels`와 `seed/demo`를 검색 인덱스에 import하지 않음. 초기 커밋에는 importer 자체를 넣지 않음.
+- `seed/labels`와 `seed/demo`를 검색 인덱스에 import하지 않음. 현재 전체 seed importer는 제공하지 않음.
 - DOC-002 환불 v2는 폐기, v3는 유효: 두 문서가 초기 데이터에 존재하는 최신 규칙을 기준으로 함.
 - DOC-001 요금 v1만 초기 사용, v2는 시연 중 등록. Team 금액은 변경 대상이 아님.
 - GitHub 경로는 루트 상대 경로, commit_sha는 7~40자리 hex 또는 null. null 근거로 코드 변경 추적을 완료했다고 표시하지 않음.
@@ -33,7 +33,7 @@ AI 서비스는 고객 메시지를 직접 발송하지 않으므로 이 차이�
 | app/api/internal/v1 | 내부 HTTP 계약·권한 검증 |
 | app/schemas | 백엔드와 공유할 직렬화 모델 |
 | app/services/pipeline | 단계 실행·검증·생성·별도 검수 |
-| app/services/llm | Gemini 제공자 어댑터 |
+| app/services/llm | Bedrock·Gemini 제공자 어댑터 |
 | app/services/rag | 청크·임베딩·검색·벡터 저장소 어댑터 |
 | app/services/backend_client.py | 서버 설정 주소로 결과 콜백 |
 | app/workers | 메모리 실행 기록·멱등 처리·최신 실행 검사·콜백 전달 |
