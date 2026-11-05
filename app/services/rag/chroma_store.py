@@ -1,5 +1,7 @@
 import hashlib
 import json
+import math
+from collections import Counter
 from threading import RLock
 from uuid import uuid4
 
@@ -18,6 +20,7 @@ from app.schemas.rag import (
     SourceView,
     TextChunk,
 )
+from app.services.rag.lexical import fuse_rankings, keyword_ranking
 from app.services.rag.vector_store import IndexTicket
 
 
@@ -316,26 +319,84 @@ class ChromaVectorStore:
                 result.warnings.append("검색 가능한 근거가 없습니다.")
                 return result
             by_generation = {r["generation"]: r for r in records}
-            hits = self._chunks(space).query(
+            collection = self._chunks(space)
+            where = {
+                "$and": [
+                    {"tenant_id": request.tenant_id},
+                    {"generation": {"$in": list(by_generation)}},
+                ]
+            }
+            hits = collection.query(
                 query_embeddings=[vector],
-                n_results=request.top_k,
-                where={
-                    "$and": [
-                        {"tenant_id": request.tenant_id},
-                        {"generation": {"$in": list(by_generation)}},
-                    ]
-                },
+                n_results=max(20, request.top_k)
+                if request.retrieval_mode == "hybrid"
+                else request.top_k,
+                where=where,
                 include=["documents", "metadatas", "distances"],
             )
-            for text, meta, distance in zip(
-                hits["documents"][0],
-                hits["metadatas"][0],
-                hits["distances"][0],
-                strict=True,
-            ):
-                score = max(-1.0, min(1.0, 1.0 - distance))
-                if score < request.min_score:
+            candidates = {
+                key: (text, meta, max(-1.0, min(1.0, 1.0 - distance)))
+                for key, text, meta, distance in zip(
+                    hits["ids"][0],
+                    hits["documents"][0],
+                    hits["metadatas"][0],
+                    hits["distances"][0],
+                    strict=True,
+                )
+            }
+            ranking = [
+                key for key, (_, _, score) in candidates.items() if score >= request.min_score
+            ]
+            if request.retrieval_mode == "hybrid":
+                # Apply tenant/version/visibility filters BEFORE either retrieval method.
+                corpus = collection.get(where=where, include=["documents", "metadatas"])
+                texts = {
+                    key: f"{by_generation[meta['generation']]['source']['title']}\n{text}"
+                    for key, text, meta in zip(
+                        corpus["ids"], corpus["documents"], corpus["metadatas"], strict=True
+                    )
+                }
+                lexical = keyword_ranking(request.lexical_query or request.query, texts)[:20]
+                missing = [key for key in lexical if key not in candidates]
+                if missing:
+                    extra = collection.get(
+                        ids=missing, include=["documents", "metadatas", "embeddings"]
+                    )
+                    norm = math.sqrt(sum(x * x for x in vector))
+                    for key, text, meta, embedding in zip(
+                        extra["ids"],
+                        extra["documents"],
+                        extra["metadatas"],
+                        extra["embeddings"],
+                        strict=True,
+                    ):
+                        denominator = norm * math.sqrt(sum(float(x) ** 2 for x in embedding))
+                        score = (
+                            sum(float(x) * y for x, y in zip(embedding, vector, strict=True))
+                            / denominator
+                        )
+                        candidates[key] = (text, meta, max(-1.0, min(1.0, score)))
+                # Low cosine candidates enter only through keyword retrieval, then face
+                # EvidenceValidator. Do not present BM25/RRF as a cosine probability.
+                fused = fuse_rankings(list(hits["ids"][0]), lexical)
+                allowed = set(ranking) | set(lexical)
+                ranking = [key for key in fused if key in allowed]
+                result.warnings.append(
+                    "하이브리드 검색 후보입니다. score는 cosine 유사도이며 "
+                    "근거 채택은 별도 검증합니다."
+                )
+            counts: Counter[str] = Counter()
+            selected = []
+            for key in ranking:
+                generation = candidates[key][1]["generation"]
+                if request.retrieval_mode == "hybrid" and counts[generation] >= 2:
                     continue
+                counts[generation] += 1
+                selected.append(key)
+                if len(selected) >= request.top_k:
+                    break
+            for key in selected:
+                text, meta, score = candidates[key]
                 source = by_generation[meta["generation"]]["source"]
                 evidence = Evidence.model_validate(source["evidence"])
                 if source["source_type"] == "문서":

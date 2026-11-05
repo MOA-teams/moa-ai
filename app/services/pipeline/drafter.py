@@ -10,6 +10,7 @@ from app.schemas.analysis import InquiryAnalysis
 from app.schemas.common import CheckStatus, ContractModel, Evidence, Sender
 from app.schemas.pipeline import Draft, PipelineRequest, StyleReference
 from app.schemas.rag import SearchHit, SearchResult
+from app.schemas.routing import ROUTING_POLICY, TeamRouting
 from app.services.llm.base import StructuredLLM
 from app.services.pipeline.analyzer import CODE_PATTERN
 from app.services.pipeline.grounding import document_map, verified_citations
@@ -90,6 +91,7 @@ class EvidenceEvaluationOutput(ContractModel):
     requires_followup_check: bool = False
     selected_doc_ids: list[str] = Field(default_factory=list, max_length=10)
     reasons: list[str] = Field(default_factory=list, max_length=10)
+    routing: TeamRouting | None = None
 
 
 class CitationOutput(ContractModel):
@@ -119,6 +121,7 @@ class ValidatedEvidence(ContractModel):
     evidence_current: CheckStatus = CheckStatus.PASS
     source_conflict: CheckStatus = CheckStatus.PASS
     reasons: list[str] = Field(default_factory=list)
+    routing: TeamRouting | None = None
 
     @model_validator(mode="after")
     def check_consistency(self) -> Self:
@@ -245,7 +248,7 @@ class EvidenceValidator:
             ],
         }
         evaluation = await self.llm.generate(
-            instruction=EVIDENCE_PROMPT,
+            instruction=EVIDENCE_PROMPT + "\n\n" + ROUTING_POLICY,
             data=json.dumps(payload, ensure_ascii=False),
             schema=EvidenceEvaluationOutput,
         )
@@ -263,7 +266,7 @@ class EvidenceValidator:
                 ],
             }
             evaluation = await self.llm.generate(
-                instruction=EVIDENCE_PROMPT,
+                instruction=EVIDENCE_PROMPT + "\n\n" + ROUTING_POLICY,
                 data=json.dumps(selected_payload, ensure_ascii=False),
                 schema=EvidenceEvaluationOutput,
             )
@@ -281,6 +284,7 @@ class EvidenceValidator:
                 evidence_current=CheckStatus.PASS,
                 source_conflict=CheckStatus.FAIL,
                 reasons=evaluation.reasons or ["근거 문서 간 내용이 충돌합니다."],
+                routing=evaluation.routing,
             )
 
         if not evaluation.relevant or not sufficient_for_draft:
@@ -291,6 +295,7 @@ class EvidenceValidator:
                 evidence_current=CheckStatus.PASS,
                 source_conflict=CheckStatus.PASS,
                 reasons=evaluation.reasons or ["질문에 답할 수 있는 근거가 부족합니다."],
+                routing=evaluation.routing,
             )
 
         requires_followup = (
@@ -306,6 +311,7 @@ class EvidenceValidator:
             evidence_current=CheckStatus.PASS,
             source_conflict=CheckStatus.PASS,
             reasons=evaluation.reasons,
+            routing=evaluation.routing,
         )
 
 
@@ -346,6 +352,7 @@ class DraftGenerator:
             "summary": analysis.summary,
             "normalized_error_code": analysis.normalized_error_code,
             "requires_followup_check": validated.requires_followup_check,
+            "routing": validated.routing.model_dump(mode="json") if validated.routing else None,
             "messages": [{"sender": m.sender.value, "text": m.text} for m in request.messages],
             "facts": [
                 {

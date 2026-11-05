@@ -16,6 +16,7 @@ from app.schemas.common import (
     TenantID,
     Urgency,
 )
+from app.schemas.routing import TeamRouting
 
 
 class Message(ContractModel):
@@ -115,6 +116,7 @@ class PipelineResult(ContractModel):
     current_stage: str | None = None
     knowledge_revision: int | None = None
     analysis: Analysis | None = None
+    routing: TeamRouting | None = None
     similar_inquiries: SimilarInquiries | None = None
     draft_result: DraftResult | None = None
     additional_question: str | None = None

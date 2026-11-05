@@ -24,12 +24,22 @@ class BackendClient:
             "X-Tenant-ID": result.tenant_id,
             "Idempotency-Key": f"pipeline-result:{result.run_id}",
         }
+        payload = result.model_dump(mode="json")
+        if not self.settings.backend_include_routing:
+            # Old backend schemas reject extra fields. Keep the recommendation visible
+            # in existing reasons until the backend accepts structured routing.
+            payload.pop("routing", None)
+            if result.routing is not None and payload.get("verification") is not None:
+                reasons = payload["verification"]["reasons"]
+                note = f"담당 팀: {result.routing.team}. {result.routing.reason}"
+                if note not in reasons:
+                    reasons.append(note)
         for attempt in range(3):
             try:
                 response = await client.post(
                     url,
                     headers=headers,
-                    json=result.model_dump(mode="json"),
+                    json=payload,
                     timeout=10,
                     follow_redirects=False,
                 )

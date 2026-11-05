@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     rag_min_score: float = Field(default=0.5, ge=-1, le=1)
     backend_base_url: AnyHttpUrl = AnyHttpUrl("http://localhost:8000")
     backend_service_token: SecretStr = SecretStr("")
+    backend_include_routing: bool = False
 
     @field_validator("embedding_dimensions")
     @classmethod

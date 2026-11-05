@@ -362,6 +362,11 @@ async def test_unrelated_conflicting_documents_do_not_block_single_selected_evid
                 "has_conflict": "DOC-104" in data and "DOC-106" in data,
                 "sufficient_for_draft": "DOC-104" not in data,
                 "requires_followup_check": False,
+                "routing": {
+                    "team": "CS",
+                    "reason": "문서의 안내로 처리 가능",
+                    "requires_human": False,
+                },
                 "selected_doc_ids": ["DOC-101"],
                 "reasons": ["선택한 비밀번호 문서만 충돌 없이 사용"],
             },
@@ -507,6 +512,11 @@ async def test_orchestrator_regenerates_once_when_draft_adds_unsupported_procedu
                 "has_conflict": False,
                 "sufficient_for_draft": True,
                 "requires_followup_check": False,
+                "routing": {
+                    "team": "CS",
+                    "reason": "문서의 안내로 처리 가능",
+                    "requires_human": False,
+                },
                 "selected_doc_ids": ["DOC-101"],
                 "reasons": [],
             },

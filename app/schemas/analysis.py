@@ -4,6 +4,7 @@ from pydantic import Field, field_validator, model_validator
 
 from app.schemas.common import ContractModel
 from app.schemas.pipeline import Analysis
+from app.schemas.routing import TeamRouting
 
 
 class AnalysisReasons(ContractModel):
@@ -13,7 +14,7 @@ class AnalysisReasons(ContractModel):
 
 
 class InquiryAnalysis(Analysis):
-    """Internal stage result; the existing pipeline callback contract is unchanged."""
+    """Internal analysis, including a provisional team recommendation."""
 
     summary: str = Field(min_length=1, max_length=1000)
     symptoms: list[str] = Field(max_length=10)
@@ -22,6 +23,7 @@ class InquiryAnalysis(Analysis):
     search_query: str | None
     reasons: AnalysisReasons
     limitations: list[str] = Field(default_factory=list, max_length=10)
+    routing: TeamRouting | None = None
 
     @field_validator("additional_question", "search_query")
     @classmethod

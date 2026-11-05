@@ -7,6 +7,7 @@ from app.core.errors import ServiceError
 from app.schemas.analysis import InquiryAnalysis
 from app.schemas.common import Sender
 from app.schemas.pipeline import PipelineRequest
+from app.schemas.routing import ROUTING_POLICY
 from app.services.llm.base import StructuredLLM
 from app.services.pipeline.analysis_prompt import ANALYSIS_INSTRUCTION
 
@@ -55,7 +56,9 @@ class InquiryAnalyzer:
             )
         try:
             output = await self.llm.generate(
-                instruction=ANALYSIS_INSTRUCTION, data=data, schema=InquiryAnalysis
+                instruction=ANALYSIS_INSTRUCTION + "\n\n" + ROUTING_POLICY,
+                data=data,
+                schema=InquiryAnalysis,
             )
             result = InquiryAnalysis.model_validate(output.model_dump())
         except ValidationError as exc:

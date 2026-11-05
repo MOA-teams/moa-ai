@@ -71,7 +71,7 @@ async def test_full_pipeline_executes_stages_and_separates_generation_from_revie
     assert DraftGenerationOutput in called_schemas
     assert ReviewLLMOutput in called_schemas
     assert called_schemas.index(DraftGenerationOutput) < called_schemas.index(ReviewLLMOutput)
-    assert len(stages_seen) == 7
+    assert len(stages_seen) == 8
 
 
 async def test_evidence_insufficient_or_conflict_withholds_draft(rag_service, pipeline_request):
@@ -220,6 +220,7 @@ async def test_pipeline_runs_idempotency_conflict_and_callback_flow(
         )
 
     client.app.state.settings.backend_service_token = SecretStr("backend-secret")
+    client.app.state.settings.backend_include_routing = True
     client.app.state.rag_service = rag_service
     client.app.state.pipeline_orchestrator = make_orchestrator(
         SchemaDispatchLLM(default_responses()), rag_service

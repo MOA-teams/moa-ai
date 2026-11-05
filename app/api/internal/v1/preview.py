@@ -7,7 +7,7 @@ from app.deps.rag import get_rag
 from app.schemas.analysis import InquiryAnalysis
 from app.schemas.common import ContractModel, RunStatus, TenantID
 from app.schemas.pipeline import PipelineRequest, PipelineResult
-from app.schemas.rag import SearchRequest, SearchResult
+from app.schemas.rag import SearchResult
 from app.services.llm.bedrock import create_llm
 from app.services.pipeline.analyzer import InquiryAnalyzer
 from app.services.pipeline.revision import (
@@ -15,6 +15,7 @@ from app.services.pipeline.revision import (
     AnswerRevisionResult,
     AnswerRevisionService,
 )
+from app.services.pipeline.search import evidence_search_request
 from app.workers.pipeline import build_orchestrator
 
 router = APIRouter(tags=["local preview"])
@@ -121,12 +122,7 @@ async def preview(
         return PreviewResult(stage="추가 질문 필요", analysis=analysis, retrieval=None)
     rag = get_rag(request)
     retrieval = await rag.search(
-        SearchRequest(
-            tenant_id=tenant_id,
-            query=analysis.search_query,
-            purpose="고객 답변",
-            min_score=settings.rag_min_score,
-        )
+        evidence_search_request(body, analysis, min_score=settings.rag_min_score)
     )
     if not full_pipeline:
         return PreviewResult(stage="RAG 검색 완료", analysis=analysis, retrieval=retrieval)

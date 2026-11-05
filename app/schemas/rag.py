@@ -98,6 +98,8 @@ class SearchRequest(ContractModel):
     purpose: Literal["고객 답변", "내부 조사"] = "고객 답변"
     top_k: int = Field(default=5, ge=1, le=20)
     min_score: float = Field(default=0.5, ge=-1, le=1)
+    retrieval_mode: Literal["vector", "hybrid"] = "vector"
+    lexical_query: str | None = Field(default=None, max_length=3000)
 
 
 class SearchHit(ContractModel):

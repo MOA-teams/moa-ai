@@ -6,11 +6,13 @@ from app.core.errors import ServiceError
 from app.schemas.analysis import InquiryAnalysis
 from app.schemas.common import CheckStatus, DraftResult, ErrorDetail, RunStatus
 from app.schemas.pipeline import Analysis, PipelineRequest, PipelineResult, Verification
-from app.schemas.rag import SearchRequest, SearchResult
+from app.schemas.rag import SearchResult
+from app.schemas.routing import TeamRouting
 from app.services.pipeline.analyzer import InquiryAnalyzer
 from app.services.pipeline.drafter import DraftGenerator, EvidenceValidator
 from app.services.pipeline.grounding import facts_are_current, invalidate_verification
 from app.services.pipeline.reviewer import DraftReviewer
+from app.services.pipeline.search import evidence_search_request
 from app.services.pipeline.similar import SimilarInquiryFinder
 from app.services.pipeline.stages import PipelineStage
 from app.services.rag.service import RagService
@@ -88,6 +90,9 @@ class PipelineOrchestrator:
                         analysis=projected_analysis,
                         draft_result=DraftResult.NEED_INFO,
                         additional_question=inquiry_analysis.additional_question,
+                        routing=TeamRouting(
+                            reason="문의 설명이 부족해 추가 질문 후 담당 팀을 판단합니다."
+                        ),
                         verification=Verification(
                             status=CheckStatus.SKIPPED,
                             checks={},
@@ -111,17 +116,21 @@ class PipelineOrchestrator:
                         503, "RAG_NOT_CONFIGURED", "Enable Chroma RAG in service settings"
                     )
                 retrieval = await self.rag.search(
-                    SearchRequest(
-                        tenant_id=request.tenant_id,
-                        query=inquiry_analysis.search_query or inquiry_analysis.summary,
-                        purpose="고객 답변",
-                        min_score=self.min_score,
-                    )
+                    evidence_search_request(request, inquiry_analysis, min_score=self.min_score)
                 )
 
             # Stage 5: 근거 검증
             report_stage(PipelineStage.VALIDATE_EVIDENCE)
             validated = await self.evidence_validator.validate(request, inquiry_analysis, retrieval)
+            report_stage(PipelineStage.ROUTE_TEAM)
+            routing = validated.routing or inquiry_analysis.routing or TeamRouting()
+            if inquiry_analysis.routing is not None and inquiry_analysis.routing.team == "테크":
+                routing = inquiry_analysis.routing
+            routing = routing.model_copy(deep=True)
+            if validated.status != "usable":
+                routing.requires_human = True
+            result = result.model_copy(update={"routing": routing})
+            validated = validated.model_copy(update={"routing": routing})
             if validated.status == "usable" and not await facts_are_current(
                 self.rag, request.tenant_id, validated.facts
             ):
@@ -162,7 +171,7 @@ class PipelineOrchestrator:
                     )
                 )
 
-            # Stage 6: 초안 생성
+            # Stage 7: 초안 생성
             report_stage(PipelineStage.GENERATE_DRAFT)
             if self.draft_generator is None or self.reviewer is None:
                 raise ServiceError(
@@ -170,7 +179,7 @@ class PipelineOrchestrator:
                 )
             draft = await self.draft_generator.generate(request, inquiry_analysis, validated)
 
-            # Stage 7: 별도 검수 (separate execution from generation)
+            # Stage 8: 별도 검수 (separate execution from generation)
             report_stage(PipelineStage.REVIEW)
             verification = await self.reviewer.review(request, inquiry_analysis, validated, draft)
             if not await facts_are_current(self.rag, request.tenant_id, validated.facts):
@@ -192,6 +201,23 @@ class PipelineOrchestrator:
                 )
                 if not await facts_are_current(self.rag, request.tenant_id, validated.facts):
                     verification = invalidate_verification(verification)
+
+            if routing.requires_human:
+                checks = dict(verification.checks)
+                if checks.get("auto_response_scope") == CheckStatus.PASS:
+                    checks["auto_response_scope"] = CheckStatus.UNKNOWN
+                verification = verification.model_copy(
+                    update={
+                        "checks": checks,
+                        "status": CheckStatus.UNKNOWN
+                        if verification.status == CheckStatus.PASS
+                        else verification.status,
+                        "reasons": [
+                            *verification.reasons,
+                            f"담당 팀: {routing.team}. {routing.reason}",
+                        ],
+                    }
+                )
 
             return result.model_copy(
                 update=dict(

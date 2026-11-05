@@ -90,6 +90,7 @@ class DraftReviewer:
             "summary": analysis.summary,
             "normalized_error_code": analysis.normalized_error_code,
             "requires_followup_check": validated.requires_followup_check,
+            "routing": validated.routing.model_dump(mode="json") if validated.routing else None,
             "review_only": request.review_only,
             "customer_messages": [m.text for m in request.messages if m.sender == Sender.CUSTOMER],
             "facts": [
@@ -127,6 +128,7 @@ class DraftReviewer:
         }
         needs_human = (
             validated.requires_followup_check
+            or (validated.routing is not None and validated.routing.requires_human)
             or request.review_only
             or analysis.category.value == "기능 오류"
             or analysis.normalized_error_code is not None

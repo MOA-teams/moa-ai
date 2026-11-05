@@ -7,6 +7,7 @@ class PipelineStage(StrEnum):
     FIND_SIMILAR = "유사 문의 탐색"
     RETRIEVE = "RAG 검색"
     VALIDATE_EVIDENCE = "근거 검증"
+    ROUTE_TEAM = "담당 팀 판단"
     GENERATE_DRAFT = "초안 생성"
     REVIEW = "별도 검수"
 
