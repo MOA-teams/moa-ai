@@ -104,8 +104,20 @@ class AnswerRevisionService:
         }
 
         candidates: list[AnswerCandidate] = []
+        latest_versions: dict[str, int] = {}
+        for src in sources:
+            if src.source_type == "우수 답변" and isinstance(src.version, int):
+                latest_versions[src.source_id] = max(
+                    latest_versions.get(src.source_id, 0), src.version
+                )
         for src in sources:
             if src.source_type != "우수 답변":
+                continue
+            if (
+                src.visibility != "고객 공개"
+                or src.status in {"폐기", "비활성"}
+                or (isinstance(src.version, int) and src.version != latest_versions[src.source_id])
+            ):
                 continue
             referenced_docs = src.evidence.docs
             is_stale_ref = any(

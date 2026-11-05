@@ -723,3 +723,31 @@ async def test_bedrock_embedder_is_the_only_embedding_provider(settings):
     assert len(doc_vecs[0]) == 1024
     assert len(q_vec) == 1024
     assert mock_client.invoke_model.call_count == 3
+
+
+async def test_stale_scan_ignores_historical_and_retired_best_answers(rag_service):
+    await rag_service.ingest(make_doc(source_id="DOC-001", text="Pro 월 9,900원"))
+    base = dict(
+        source_type="우수 답변",
+        source_id="BA-001",
+        title="Pro 요금 안내",
+        text="Pro 월 9,900원",
+        evidence={"docs": [{"doc_id": "DOC-001", "version": 1}], "code": []},
+    )
+    await rag_service.ingest(make_doc(**base))
+    await rag_service.ingest(make_doc(source_id="DOC-001", version=2, text="Pro 월 12,900원"))
+    await rag_service.ingest(
+        make_doc(
+            **{
+                **base,
+                "version": 2,
+                "text": "Pro 월 12,900원",
+                "evidence": {"docs": [{"doc_id": "DOC-001", "version": 2}], "code": []},
+            }
+        )
+    )
+    await rag_service.ingest(make_doc(**{**base, "source_id": "BA-002", "status": "폐기"}))
+    await rag_service.ingest(make_doc(**{**base, "source_id": "BA-003", "review_required": True}))
+    service = AnswerRevisionService(llm=SchemaDispatchLLM({}), rag=rag_service)
+    candidates = await service.find_stale_best_answers("syncnote")
+    assert [item.target_id for item in candidates] == ["BA-003"]

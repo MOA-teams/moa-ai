@@ -252,6 +252,8 @@ class PipelineOrchestrator:
                 update=dict(
                     run_status=RunStatus.FAILED,
                     current_stage=current_stage.value if current_stage else None,
+                    analysis=None,
+                    routing=None,
                     error=ErrorDetail(
                         code=exc.code,
                         message=exc.message,
@@ -268,6 +270,8 @@ class PipelineOrchestrator:
                 update=dict(
                     run_status=RunStatus.FAILED,
                     current_stage=current_stage.value if current_stage else None,
+                    analysis=None,
+                    routing=None,
                     error=ErrorDetail(
                         code="PIPELINE_EXECUTION_ERROR",
                         message="파이프라인 실행 중 오류가 발생했습니다.",

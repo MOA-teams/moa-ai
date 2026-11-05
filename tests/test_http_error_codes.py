@@ -206,3 +206,18 @@ async def test_unexpected_failure_records_stage_without_customer_text(pipeline_r
     assert result.current_stage == "문의 분석"
     assert "PRIVATE_CUSTOMER_TEXT_TOKEN" not in caplog.text
     assert "RuntimeError" in caplog.text
+
+
+async def test_late_failure_keeps_error_only_backend_contract(pipeline_request):
+    class Rag:
+        async def search(self, *args, **kwargs):
+            raise ServiceError(504, "EMBEDDING_TIMEOUT", "Embedding request timed out")
+
+    llm = StubLLM(searchable_result(normalized_error_code=None))
+    result = await PipelineOrchestrator(analyzer=InquiryAnalyzer(llm), rag=Rag()).execute(
+        PipelineRequest.model_validate(pipeline_request)
+    )
+    assert result.run_status == "실패" and result.error.code == "EMBEDDING_TIMEOUT"
+    assert result.analysis is None and result.routing is None
+    assert result.draft is None and result.verification is None
+    assert result.current_stage == "유사 문의 탐색"
