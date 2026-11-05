@@ -102,6 +102,55 @@ def test_contradictory_information_results_rejected(changes):
         InquiryAnalysis.model_validate(searchable_result(**changes))
 
 
+def test_followup_fields_match_backend_safe_question_allowlist():
+    result = InquiryAnalysis.model_validate(
+        searchable_result(
+            normalized_error_code=None,
+            needs_more_info=True,
+            missing_fields=["구체적인 기능/화면", "증상 설명", "오류 코드 또는 메시지"],
+            additional_question="어떤 기능에서 어떤 오류가 발생하나요?",
+            search_query=None,
+        )
+    )
+    assert result.missing_fields == ["발생 화면", "재현 단계", "오류 코드"]
+    assert set(result.missing_fields) <= {
+        "발생 화면",
+        "재현 단계",
+        "발생 환경",
+        "앱 버전",
+        "오류 코드",
+    }
+
+
+@pytest.mark.parametrize(
+    "fields", [["비밀번호"], ["주민등록번호"], ["발생 화면", "재현 단계", "발생 환경", "앱 버전"]]
+)
+def test_disallowed_or_excessive_followup_fields_are_rejected(fields):
+    with pytest.raises(ValidationError):
+        InquiryAnalysis.model_validate(
+            searchable_result(
+                normalized_error_code=None,
+                needs_more_info=True,
+                missing_fields=fields,
+                additional_question="추가 정보를 알려주세요.",
+                search_query=None,
+            )
+        )
+
+
+def test_followup_field_aliases_are_deduplicated():
+    result = InquiryAnalysis.model_validate(
+        searchable_result(
+            normalized_error_code=None,
+            needs_more_info=True,
+            missing_fields=["발생 화면", "대상 기능", "screen"],
+            additional_question="어떤 화면인가요?",
+            search_query=None,
+        )
+    )
+    assert result.missing_fields == ["발생 화면"]
+
+
 async def test_invented_error_code_rejected(pipeline_request):
     llm = StubLLM(searchable_result())
     with pytest.raises(ServiceError) as exc:
@@ -205,7 +254,7 @@ async def test_actionable_error_code_inquiry_proceeds_to_search(pipeline_request
             summary="저장 버튼 클릭 시 E-502 오류 발생",
             symptoms=["저장 시 E-502 발생"],
             needs_more_info=True,
-            missing_fields=["발생 화면", "발생 시점"],
+            missing_fields=["발생 화면", "발생 환경"],
             additional_question="어느 화면에서 저장할 때 발생하나요?",
             search_query=None,
         )

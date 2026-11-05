@@ -46,6 +46,9 @@ ANALYSIS_INSTRUCTION = """
   무엇을 검색해야 할지조차 알 수 없는 경우에만** needs_more_info=true로 판정한다.
 대화 앞부분에 이미 있는 정보는 다시 묻지 않는다. OS/버전/오류 코드는 항상 필수는 아니다.
 추가 질문은 누락된 핵심 정보만 1~2개 묻는다. 비밀번호·인증코드·전체 카드번호를 요구하지 않는다.
+missing_fields는 백엔드 자동 질문 계약의 '발생 화면', '재현 단계', '발생 환경', '앱 버전',
+'오류 코드' 중에서만 선택한다. '증상 설명', '구체적인 기능/화면'처럼 새 항목명을 만들지 않는다.
+이미 알려진 정보는 제외하고 중복 없이 최대 3개만 선택한다.
 부족하면 needs_more_info=true, missing_fields에 누락 항목,
 additional_question에 질문, search_query=null.
 충분하면 needs_more_info=false, missing_fields=[], additional_question=null,

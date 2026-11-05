@@ -1,10 +1,30 @@
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import Field, field_validator, model_validator
 
 from app.schemas.common import ContractModel
 from app.schemas.pipeline import Analysis
 from app.schemas.routing import TeamRouting
+
+MissingField = Literal["발생 화면", "재현 단계", "발생 환경", "앱 버전", "오류 코드"]
+MISSING_FIELD_ALIASES = {
+    "구체적인 기능/화면": "발생 화면",
+    "기능/화면": "발생 화면",
+    "대상 기능": "발생 화면",
+    "화면": "발생 화면",
+    "screen": "발생 화면",
+    "증상 설명": "재현 단계",
+    "증상": "재현 단계",
+    "재현 방법": "재현 단계",
+    "steps_to_reproduce": "재현 단계",
+    "환경": "발생 환경",
+    "운영체제": "발생 환경",
+    "os": "발생 환경",
+    "app_version": "앱 버전",
+    "오류 코드 또는 메시지": "오류 코드",
+    "오류 메시지": "오류 코드",
+    "error_code": "오류 코드",
+}
 
 
 class AnalysisReasons(ContractModel):
@@ -17,6 +37,7 @@ class InquiryAnalysis(Analysis):
     """Internal analysis, including a provisional team recommendation."""
 
     summary: str = Field(min_length=1, max_length=1000)
+    missing_fields: list[MissingField] = Field(default_factory=list, max_length=3)
     symptoms: list[str] = Field(max_length=10)
     needs_more_info: bool
     additional_question: str | None
@@ -24,6 +45,22 @@ class InquiryAnalysis(Analysis):
     reasons: AnalysisReasons
     limitations: list[str] = Field(default_factory=list, max_length=10)
     routing: TeamRouting | None = None
+
+    @field_validator("missing_fields", mode="before")
+    @classmethod
+    def normalize_question_fields(cls, value):
+        if not isinstance(value, list):
+            return value
+        result = []
+        for item in value:
+            canonical = (
+                MISSING_FIELD_ALIASES.get(item.strip(), item.strip())
+                if isinstance(item, str)
+                else item
+            )
+            if canonical not in result:
+                result.append(canonical)
+        return result
 
     @field_validator("additional_question", "search_query")
     @classmethod
