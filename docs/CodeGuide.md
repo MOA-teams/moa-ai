@@ -30,8 +30,8 @@ API 파일은 접수만, worker는 실행 기록과 전달만, orchestrator는 A
 | 별도 검수 | `reviewer.py`의 `DraftReviewer.review` | 초안·근거 → 검수 항목별 결과·전체 결과 |
 
 LLM에게 무엇을 판단시키는지는 각 파일 상단의 `*_PROMPT` 또는 `analysis_prompt.py`를 보면 됩니다.
-생성 LLM 선택은 `app/services/llm/bedrock.py`의 `create_llm`에서 합니다. Bedrock과 Gemini의 실제 호출은 각 어댑터에 있습니다.
-자료를 나누는 방식은 `rag/chunking.py`, 검색용 임베딩 호출은 `rag/embedding.py`, 실제 Chroma 접근은 `rag/chroma_store.py`에 있습니다.
+생성 LLM은 `app/services/llm/bedrock.py`의 `create_llm`에서 Bedrock으로 준비합니다.
+자료를 나누는 방식은 `rag/chunking.py`, 검색용 Bedrock Titan 임베딩 호출은 `rag/embedding.py`, 실제 Chroma 접근은 `rag/chroma_store.py`에 있습니다.
 
 ## 3. 코드로 확정하는 검사와 LLM 판단의 차이
 

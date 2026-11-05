@@ -13,7 +13,6 @@ from pydantic import BaseModel, ValidationError
 from app.core.config import Settings
 from app.core.errors import ServiceError
 from app.services.llm.base import StructuredLLM
-from app.services.llm.gemini import GeminiLLM
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -59,7 +58,7 @@ class BedrockLLM:
         if bearer:
             os.environ["AWS_BEARER_TOKEN_BEDROCK"] = bearer
 
-        timeout_sec = max(10, int(self.settings.gemini_timeout_ms / 1000))
+        timeout_sec = max(10, int(self.settings.bedrock_timeout_ms / 1000))
         cfg = Config(
             region_name=self.settings.aws_region,
             retries={"max_attempts": 3, "mode": "standard"},
@@ -82,7 +81,7 @@ class BedrockLLM:
         host = self.settings.bedrock_ssh_host.strip()
         user = self.settings.bedrock_ssh_user.strip() or "ubuntu"
         key_path = os.path.expanduser(self.settings.bedrock_ssh_key_path.strip())
-        timeout_sec = max(15, int(self.settings.gemini_timeout_ms / 1000))
+        timeout_sec = max(15, int(self.settings.bedrock_timeout_ms / 1000))
         payload = json.dumps(
             {
                 "region": self.settings.aws_region,
@@ -115,7 +114,7 @@ class BedrockLLM:
         if proc.returncode != 0:
             stderr_msg = proc.stderr.decode("utf-8", errors="replace").strip()
             cause = RuntimeError(stderr_msg or f"ssh exit code {proc.returncode}")
-            raise ServiceError(502, "GEMINI_UNAVAILABLE", "Bedrock SSH relay failed") from cause
+            raise ServiceError(502, "LLM_UNAVAILABLE", "Bedrock SSH relay failed") from cause
         return _strip_code_fence(proc.stdout.decode("utf-8", errors="replace"))
 
     def _converse_sync(self, instruction: str, data: str, json_schema: dict) -> str:
@@ -153,11 +152,11 @@ class BedrockLLM:
         except ServiceError:
             raise
         except subprocess.TimeoutExpired as exc:
-            raise ServiceError(504, "GEMINI_TIMEOUT", "Bedrock request timed out") from exc
+            raise ServiceError(504, "LLM_TIMEOUT", "Bedrock request timed out") from exc
         except NoCredentialsError as exc:
             raise ServiceError(
                 503,
-                "GEMINI_NOT_CONFIGURED",
+                "LLM_NOT_CONFIGURED",
                 "Set AWS Bedrock credentials or AWS_BEARER_TOKEN_BEDROCK",
             ) from exc
         except ClientError as exc:
@@ -169,7 +168,7 @@ class BedrockLLM:
                 or http_status == 429
             ):
                 raise ServiceError(
-                    429, "GEMINI_RATE_LIMITED", "Bedrock quota or rate limit reached"
+                    429, "LLM_RATE_LIMITED", "Bedrock quota or rate limit reached"
                 ) from exc
             if err_code in {
                 "AccessDeniedException",
@@ -179,17 +178,17 @@ class BedrockLLM:
                 "ResourceNotFoundException",
             } or http_status in {401, 403, 404}:
                 raise ServiceError(
-                    503, "GEMINI_CONFIGURATION_ERROR", "Check Bedrock credentials and model ID"
+                    503, "LLM_CONFIGURATION_ERROR", "Check Bedrock credentials and model ID"
                 ) from exc
             if err_code == "ValidationException" or http_status == 400:
                 raise ServiceError(
-                    502, "GEMINI_REQUEST_REJECTED", "Bedrock rejected the request format"
+                    502, "LLM_REQUEST_REJECTED", "Bedrock rejected the request format"
                 ) from exc
             if err_code == "ModelTimeoutException" or http_status == 504:
-                raise ServiceError(504, "GEMINI_TIMEOUT", "Bedrock request timed out") from exc
-            raise ServiceError(502, "GEMINI_UNAVAILABLE", "Bedrock request failed") from exc
+                raise ServiceError(504, "LLM_TIMEOUT", "Bedrock request timed out") from exc
+            raise ServiceError(502, "LLM_UNAVAILABLE", "Bedrock request failed") from exc
         except BotoCoreError as exc:
-            raise ServiceError(502, "GEMINI_UNAVAILABLE", "Bedrock connection failed") from exc
+            raise ServiceError(502, "LLM_UNAVAILABLE", "Bedrock connection failed") from exc
 
         if not raw_text:
             raise ServiceError(502, "EMPTY_LLM_RESPONSE", "Model returned no structured output")
@@ -201,42 +200,6 @@ class BedrockLLM:
             ) from exc
 
 
-class AutoFallbackLLM:
-    """Tries primary LLM first and falls back to secondary LLM when unconfigured or rate-limited."""
-
-    def __init__(self, primary: StructuredLLM, secondary: StructuredLLM):
-        self.primary = primary
-        self.secondary = secondary
-
-    async def generate(self, *, instruction: str, data: str, schema: type[T]) -> T:
-        try:
-            return await self.primary.generate(instruction=instruction, data=data, schema=schema)
-        except ServiceError as primary_exc:
-            if primary_exc.code not in {
-                "GEMINI_NOT_CONFIGURED",
-                "GEMINI_CONFIGURATION_ERROR",
-                "GEMINI_RATE_LIMITED",
-                "GEMINI_UNAVAILABLE",
-                "GEMINI_TIMEOUT",
-                "GEMINI_CREDITS_DEPLETED",
-            }:
-                raise
-            try:
-                return await self.secondary.generate(
-                    instruction=instruction, data=data, schema=schema
-                )
-            except ServiceError:
-                raise primary_exc from None
-
-
 def create_llm(settings: Settings) -> StructuredLLM:
-    provider = settings.llm_provider
-    if provider == "bedrock":
-        return BedrockLLM(settings)
-    if provider == "gemini":
-        return GeminiLLM(settings)
-    # "auto": if Bedrock bearer token or AWS credentials exist, try Bedrock first then Gemini;
-    # otherwise try Gemini first then Bedrock.
-    if settings.has_bedrock_credentials:
-        return AutoFallbackLLM(BedrockLLM(settings), GeminiLLM(settings))
-    return AutoFallbackLLM(GeminiLLM(settings), BedrockLLM(settings))
+    """모든 생성·분류·검수 단계는 Bedrock을 사용한다."""
+    return BedrockLLM(settings)

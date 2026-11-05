@@ -33,7 +33,7 @@ AI 서비스는 고객 메시지를 직접 발송하지 않으므로 이 차이�
 | app/api/internal/v1 | 내부 HTTP 계약·권한 검증 |
 | app/schemas | 백엔드와 공유할 직렬화 모델 |
 | app/services/pipeline | 단계 실행·검증·생성·별도 검수 |
-| app/services/llm | Bedrock·Gemini 제공자 어댑터 |
+| app/services/llm | Bedrock 생성 모델 어댑터 |
 | app/services/rag | 청크·임베딩·검색·벡터 저장소 어댑터 |
 | app/services/backend_client.py | 서버 설정 주소로 결과 콜백 |
 | app/workers | 메모리 실행 기록·멱등 처리·최신 실행 검사·콜백 전달 |

@@ -15,7 +15,7 @@ from app.services.pipeline.analyzer import (
 
 
 class StubLLM:
-    """Only tests integration/validation; not a substitute for measured Gemini quality."""
+    """Only tests integration/validation; not a substitute for measured model quality."""
 
     def __init__(self, result):
         self.result = result

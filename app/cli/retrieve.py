@@ -13,7 +13,7 @@ from app.core.config import get_settings
 from app.core.errors import ServiceError
 from app.schemas.rag import SearchRequest, SourceInput
 from app.services.rag.chroma_store import ChromaVectorStore
-from app.services.rag.embedding import GeminiEmbedder
+from app.services.rag.embedding import create_embedder
 from app.services.rag.service import RagService
 
 
@@ -22,7 +22,7 @@ async def retrieve(query: str, sources: Path | None, tenant: str) -> dict:
     if tenant not in settings.tenant_ids:
         raise ServiceError(403, "FORBIDDEN", "Tenant access denied")
     store = ChromaVectorStore(settings.chroma_path)
-    service = RagService(store, GeminiEmbedder(settings))
+    service = RagService(store, create_embedder(settings))
     try:
         if sources is not None:
             inputs = TypeAdapter(list[SourceInput]).validate_json(sources.read_text())

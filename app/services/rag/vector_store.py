@@ -30,7 +30,13 @@ class VectorStore(Protocol):
     def complete(self, ticket: IndexTicket, vectors: list[list[float]]) -> bool: ...
     def fail(self, ticket: IndexTicket, error: str) -> None: ...
     def get(
-        self, tenant: str, source_type: str, source_id: str, version: int | str
+        self,
+        tenant: str,
+        source_type: str,
+        source_id: str,
+        version: int | str,
+        *,
+        space: str | None = None,
     ) -> SourceView: ...
     def update_statuses(self, batch: SourceStatusBatch) -> SourceStatusResult: ...
     def search(

@@ -647,7 +647,7 @@ def test_preview_reports_failed_stage_when_pipeline_result_fails(
                 inquiry_revision=1,
                 based_on_message_id=request.based_on_message_id,
                 run_status="실패",
-                error={"code": "GEMINI_RATE_LIMITED", "message": "test", "retryable": True},
+                error={"code": "LLM_RATE_LIMITED", "message": "test", "retryable": True},
             )
 
     app.state.inquiry_analyzer = Analyzer()
@@ -686,20 +686,16 @@ def test_bedrock_bearer_token_updates_on_new_settings(settings):
     assert seen == ["fake-first", "fake-second"]
 
 
-async def test_bedrock_embedder_selected_when_provider_is_bedrock_without_gemini_key(settings):
+async def test_bedrock_embedder_is_the_only_embedding_provider(settings):
     import io
     import json
     from unittest.mock import MagicMock, patch
-
-    from pydantic import SecretStr
 
     from app.services.rag.embedding import BedrockEmbedder, create_embedder
 
     cfg = settings.model_copy(
         update={
-            "llm_provider": "bedrock",
-            "gemini_api_key": SecretStr(""),
-            "embedding_dimensions": 768,
+            "embedding_dimensions": 1024,
         }
     )
     embedder = create_embedder(cfg)

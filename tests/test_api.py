@@ -35,7 +35,13 @@ def test_unknown_tenant_denied(client, headers):
     assert client.get("/internal/v1/pipeline-runs/RUN-000001", headers=headers).status_code == 403
 
 
-def test_pipeline_run_submission_and_lookup(client, headers, pipeline_request):
+def test_pipeline_run_submission_and_lookup(client, headers, pipeline_request, monkeypatch):
+    from app.core.errors import ServiceError
+
+    async def unavailable(self, **kwargs):
+        raise ServiceError(503, "LLM_NOT_CONFIGURED", "Test credentials are absent")
+
+    monkeypatch.setattr("app.services.llm.bedrock.BedrockLLM.generate", unavailable)
     response = client.post("/internal/v1/pipeline-runs", json=pipeline_request, headers=headers)
     assert response.status_code == 202
     data = response.json()

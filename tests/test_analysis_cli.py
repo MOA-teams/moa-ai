@@ -16,14 +16,14 @@ def test_cli_prints_json_result(monkeypatch, capsys):
 
 def test_cli_missing_key_has_actionable_error_without_traceback(monkeypatch, capsys):
     async def run(path):
-        raise ServiceError(503, "GEMINI_NOT_CONFIGURED", "Set Gemini key and model")
+        raise ServiceError(503, "LLM_NOT_CONFIGURED", "Set AWS credentials and model")
 
     monkeypatch.setattr(analyze, "analyze_file", run)
     monkeypatch.setattr("sys.argv", ["analyze", "examples/analysis/account.json"])
     assert analyze.main() == 1
     output = capsys.readouterr()
     assert not output.out
-    assert json.loads(output.err)["error"]["code"] == "GEMINI_NOT_CONFIGURED"
+    assert json.loads(output.err)["error"]["code"] == "LLM_NOT_CONFIGURED"
 
 
 def test_cli_missing_input_is_sanitized(monkeypatch, capsys):
@@ -33,26 +33,28 @@ def test_cli_missing_input_is_sanitized(monkeypatch, capsys):
 
 
 def test_debug_includes_provider_status_but_redacts_keys(monkeypatch, capsys, settings):
-    from google.genai import errors
+    from botocore.exceptions import ClientError
     from pydantic import SecretStr
 
-    secret = "AIza-test-credential-for-redaction"
-    settings.gemini_api_key = SecretStr(secret)
-    settings.gemini_model = "gemini-test-model"
+    secret = "ABSK-test-credential-for-redaction"
+    settings.bedrock_bearer_token = SecretStr(secret)
+    settings.bedrock_model_id = "test-bedrock-model"
     monkeypatch.setattr(analyze, "get_settings", lambda: settings)
 
     async def run(path):
         try:
-            raise errors.APIError(
-                503,
+            raise ClientError(
                 {
-                    "error": {
-                        "message": f"High demand; key={secret}",
-                    }
+                    "Error": {
+                        "Code": "ServiceUnavailableException",
+                        "Message": f"Unavailable; key={secret}",
+                    },
+                    "ResponseMetadata": {"HTTPStatusCode": 503},
                 },
+                "Converse",
             )
-        except errors.APIError as exc:
-            raise ServiceError(502, "GEMINI_UNAVAILABLE", "Gemini request failed") from exc
+        except ClientError as exc:
+            raise ServiceError(502, "LLM_UNAVAILABLE", "Bedrock request failed") from exc
 
     monkeypatch.setattr(analyze, "analyze_file", run)
     monkeypatch.setattr("sys.argv", ["analyze", "example.json", "--debug"])
@@ -60,7 +62,7 @@ def test_debug_includes_provider_status_but_redacts_keys(monkeypatch, capsys, se
     output = capsys.readouterr()
     data = json.loads(output.err)
     assert data["diagnostics"]["provider_http_status"] == 503
-    assert data["diagnostics"]["model"] == "gemini-test-model"
+    assert data["diagnostics"]["model"] == "test-bedrock-model"
     assert secret not in output.err
     assert "REDACTED" in data["diagnostics"]["provider_message"]
 
@@ -74,7 +76,7 @@ def test_debug_distinguishes_local_timeout_from_provider_http_error(monkeypatch,
         try:
             raise httpx.ReadTimeout("private transport details")
         except httpx.ReadTimeout as exc:
-            raise ServiceError(504, "GEMINI_TIMEOUT", "Gemini request timed out") from exc
+            raise ServiceError(504, "LLM_TIMEOUT", "Bedrock request timed out") from exc
 
     monkeypatch.setattr(analyze, "analyze_file", run)
     monkeypatch.setattr("sys.argv", ["analyze", "example.json", "--debug"])

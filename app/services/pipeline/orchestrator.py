@@ -16,9 +16,9 @@ from app.services.pipeline.stages import PipelineStage
 from app.services.rag.service import RagService
 
 RETRYABLE_ERROR_CODES = {
-    "GEMINI_UNAVAILABLE",
-    "GEMINI_TIMEOUT",
-    "GEMINI_RATE_LIMITED",
+    "LLM_UNAVAILABLE",
+    "LLM_TIMEOUT",
+    "LLM_RATE_LIMITED",
     "EMBEDDING_API_ERROR",
     "EMBEDDING_TIMEOUT",
     "EMBEDDING_CONNECTION_FAILED",

@@ -58,7 +58,9 @@ class RagService:
     async def get(
         self, tenant: str, source_type: str, source_id: str, version: int | str
     ) -> SourceView:
-        return await asyncio.to_thread(self.store.get, tenant, source_type, source_id, version)
+        return await asyncio.to_thread(
+            self.store.get, tenant, source_type, source_id, version, space=self.embedder.space
+        )
 
     async def update_statuses(self, batch: SourceStatusBatch) -> SourceStatusResult:
         return await asyncio.to_thread(self.store.update_statuses, batch)

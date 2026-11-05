@@ -7,8 +7,8 @@
 
 - **백엔드:** PostgreSQL, 문의·채팅·첨부, 권한, 그룹 확정, 승인·발송, 답변 평가, GitHub 자료 수집.
 - **AI:** 문의 분석·정보 부족 판단, 유사 문의 탐색, RAG, 근거 검증, 초안 생성·검수, 실행 관리.
-- **생성 LLM:** AWS Bedrock 또는 Gemini. `MOA_LLM_PROVIDER`로 명시적으로 선택할 수 있습니다.
-- **임베딩:** Gemini `gemini-embedding-001`, 기본 768차원. Bedrock을 선택해도 Gemini 키가 필요합니다.
+- **생성 LLM:** AWS Bedrock Claude Haiku. 분석·근거 검증·초안·별도 검수에 같은 Bedrock 어댑터를 사용합니다.
+- **임베딩:** AWS Bedrock `amazon.titan-embed-text-v2:0`, 기본 1024차원. Google API 키는 사용하지 않습니다.
 - **벡터 DB:** Chroma `PersistentClient`. `.data/chroma`에 자료·청크·상태를 보존합니다.
 
 문의 접수 → 분석 → 정보 부족 시 추가 질문 반환 → 충분하면 유사 문의·근거 검색 → 근거 검증 → 초안 생성 → 별도 검수 → 결과 저장·백엔드 콜백.
@@ -43,26 +43,22 @@ uvicorn app.main:app --host 127.0.0.1 --port 8001
 |---|---|
 | `MOA_INTERNAL_TOKEN` | 백엔드→AI 서비스 인증. 빈 값이면 내부 요청 차단 |
 | `MOA_ALLOWED_TENANTS` | 허용된 회사 ID. 기본 `syncnote`, 쉼표로 구분 |
-| `MOA_LLM_PROVIDER` | `bedrock` / `gemini` / `auto`. 자동 대체가 필요할 때만 `auto` 선택 |
 | `MOA_AWS_REGION` | Bedrock 리전. `AWS_REGION` 별칭도 지원 |
 | `MOA_BEDROCK_MODEL_ID` | Bedrock 모델 ID. `BEDROCK_MODEL_ID` 별칭도 지원 |
 | `MOA_BEDROCK_MAX_TOKENS` | Bedrock 출력 토큰 상한 |
+| `MOA_BEDROCK_EMBEDDING_MODEL` | Bedrock 임베딩 모델 ID. 기본 Titan Text Embeddings V2 |
+| `MOA_BEDROCK_TIMEOUT_MS` | Bedrock 호출 제한 시간. 기본 30,000ms |
+| `MOA_EMBEDDING_DIMENSIONS` | Titan V2 차원. 256 / 512 / 1024, 기본 1024 |
 | `MOA_BEDROCK_API_KEY` | 선택적인 Bedrock Bearer 키. EC2 IAM Role 등 SDK 자격 증명도 지원 |
 | `MOA_BEDROCK_SSH_HOST` / `MOA_BEDROCK_SSH_USER` / `MOA_BEDROCK_SSH_KEY_PATH` | 로컬 AWS 자격 증명이 없을 때 사용하는 선택적 개발용 SSH 중계. 원격 `$HOME/venv/bin/python`과 boto3 필요 |
-| `MOA_GEMINI_API_KEY` | Gemini 생성 또는 임베딩 키. 복수 키는 쉼표로 구분 |
-| `MOA_GEMINI_MODEL` | Gemini 생성 모델 |
-| `MOA_GEMINI_FALLBACK_MODELS` | Gemini 대체 모델 목록. 예시 설정은 빈 값으로 불필요한 모델 순회를 끔 |
-| `MOA_GEMINI_MAX_RETRIES` | 모델/키당 호출 시도 수. 기본 2이며 추가 재시도 횟수가 아님 |
-| `MOA_GEMINI_TIMEOUT_MS` | Gemini 호출 제한 시간. 현재 Bedrock 제한 시간 계산에도 사용 |
 | `MOA_ANALYSIS_MAX_INPUT_CHARS` | 분석 입력 문자 제한. 기본 30,000 |
-| `MOA_GEMINI_EMBEDDING_MODEL` / `MOA_EMBEDDING_DIMENSIONS` | 임베딩 모델과 차원 |
 | `MOA_CHROMA_PATH` | Chroma 저장 폴더 |
 | `MOA_RAG_ENABLED` | RAG 활성화 |
 | `MOA_ENABLE_PREVIEW` | 개발용 preview API 노출. 기본 비활성 |
 | `MOA_RAG_MIN_SCORE` | 검색 최소 코사인 유사도. 기본 0.5, 정답 확률이 아님 |
 | `MOA_BACKEND_BASE_URL` / `MOA_BACKEND_SERVICE_TOKEN` | AI→백엔드 콜백 주소와 토큰 |
 
-생성 모델과 임베딩은 별도 호출입니다. 전체 파이프라인은 여러 LLM 단계를 호출하며, 충돌 재검증·초안 수정·제공자 대체에 따라 호출 수가 늘어날 수 있습니다. `auto`는 다른 제공자로 전환할 수 있으므로 비용·한도는 실제 설정을 기준으로 확인하세요.
+생성 모델과 임베딩은 별도 Bedrock 호출입니다. 전체 파이프라인은 여러 LLM 단계를 호출하며, 충돌 재검증·초안 수정 및 SDK 재시도에 따라 호출 수가 늘어날 수 있습니다. 다른 제공자로 자동 전환하지 않습니다.
 키·개인키·실제 고객 자료를 커밋하지 않습니다. Bedrock은 클라우드 LLM이며 SSH 경유도 로컬 LLM 실행은 아닙니다.
 
 ## API 및 백엔드 연결
@@ -94,12 +90,17 @@ uvicorn app.main:app --host 127.0.0.1 --port 8001
 
 Swagger 테스트는 `.env`의 `MOA_ENABLE_PREVIEW=true` 설정 후 서버를 실행합니다.
 
-1. Authorize에 Gemini 키가 아닌 `MOA_INTERNAL_TOKEN` 값만 입력합니다.
+1. Authorize에 Bedrock 키가 아닌 `MOA_INTERNAL_TOKEN` 값만 입력합니다.
 2. `POST /internal/v1/pipeline-preview`에서 회사 ID `syncnote`와 준비된 문의 예시를 선택합니다.
 3. `full_pipeline=false`는 분석·검색, `true`는 초안·검수까지 실행합니다. 정보 부족이면 질문으로 먼저 종료합니다.
 4. `POST /internal/v1/answer-revision-preview`로 기존 답변의 수정 필요 여부·수정안·검수 결과를 확인합니다.
 
 Preview는 고객 메시지 발송·백엔드 콜백을 하지 않습니다. IDE용 요청 예시는 `test_main.http`에 있습니다.
+
+## 임베딩 모델 전환
+
+이전 Gemini 벡터는 Titan 벡터와 같은 공간에서 검색할 수 없습니다. 기존 자료 원문을 `POST /internal/v1/rag/sources`로 다시 보내면 같은 자료·버전이어도 새 임베딩 공간으로 재인덱싱합니다. 데이터 폴더를 삭제할 필요는 없습니다.
+새 임베딩 공간으로 처리되기 전에는 자료 상태의 `searchable`이 false이고 검색에서 제외됩니다. 기존 `.env`/배포용 `ENV_FILE`의 `MOA_EMBEDDING_DIMENSIONS=768`은 `1024`로 변경해야 합니다.
 
 ## 자동 검증
 

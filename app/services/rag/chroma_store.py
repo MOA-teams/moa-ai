@@ -187,14 +187,26 @@ class ChromaVectorStore:
             )
         ]
 
-    def get(self, tenant: str, source_type: str, source_id: str, version: int | str) -> SourceView:
+    def get(
+        self,
+        tenant: str,
+        source_type: str,
+        source_id: str,
+        version: int | str,
+        *,
+        space: str | None = None,
+    ) -> SourceView:
         with self.lock:
             key = source_key(tenant, source_type, source_id, version)
             record = self._get(key)
             if not record:
                 raise ServiceError(404, "SOURCE_NOT_FOUND", "Source not found")
             source = record["source"]
-            eligible = {r["generation"] for r in self._eligible_records(tenant)}
+            eligible = {
+                r["generation"]
+                for r in self._eligible_records(tenant)
+                if space is None or r["space"] == space
+            }
             return SourceView(
                 source_id=source_id,
                 version=source["version"],
