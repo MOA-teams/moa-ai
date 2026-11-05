@@ -178,13 +178,13 @@ def test_stage_result_projects_to_existing_pipeline_contract():
         ("Pro 요금제의 월 가격을 알려주세요.", "결제"),
     ],
 )
-async def test_category_boundaries_override_usage_for_account_and_payment(
+async def test_category_boundaries_guided_by_analysis_instruction(
     pipeline_request, text, expected_category
 ):
     pipeline_request["messages"][0]["text"] = text
     llm = StubLLM(
         searchable_result(
-            category="이용 방법",
+            category=expected_category,
             normalized_error_code=None,
             summary=text,
             search_query=text,
@@ -192,6 +192,8 @@ async def test_category_boundaries_override_usage_for_account_and_payment(
     )
     result = await InquiryAnalyzer(llm).analyze(PipelineRequest.model_validate(pipeline_request))
     assert result.category.value == expected_category
+    assert "비밀번호" in llm.calls[0]["instruction"]
+    assert "요금제" in llm.calls[0]["instruction"]
 
 
 async def test_actionable_error_code_inquiry_proceeds_to_search(pipeline_request):

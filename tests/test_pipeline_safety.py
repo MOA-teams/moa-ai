@@ -684,3 +684,36 @@ def test_bedrock_bearer_token_updates_on_new_settings(settings):
             cfg = settings.model_copy(update={"bedrock_bearer_token": SecretStr(value)})
             BedrockLLM(cfg)._build_client()
     assert seen == ["fake-first", "fake-second"]
+
+
+async def test_bedrock_embedder_selected_when_provider_is_bedrock_without_gemini_key(settings):
+    import io
+    import json
+    from unittest.mock import MagicMock, patch
+
+    from pydantic import SecretStr
+
+    from app.services.rag.embedding import BedrockEmbedder, create_embedder
+
+    cfg = settings.model_copy(
+        update={
+            "llm_provider": "bedrock",
+            "gemini_api_key": SecretStr(""),
+            "embedding_dimensions": 768,
+        }
+    )
+    embedder = create_embedder(cfg)
+    assert isinstance(embedder, BedrockEmbedder)
+    assert embedder.space == "amazon.titan-embed-text-v2:0:1024"
+
+    mock_client = MagicMock()
+    mock_client.invoke_model.side_effect = lambda **kw: {
+        "body": io.BytesIO(json.dumps({"embedding": [1.0] + [0.0] * 1023}).encode("utf-8"))
+    }
+    with patch.object(BedrockEmbedder, "_build_client", return_value=mock_client):
+        doc_vecs = await embedder.documents(["문서 1", "문서 2"])
+        q_vec = await embedder.query("비밀번호 변경 방법")
+    assert len(doc_vecs) == 2
+    assert len(doc_vecs[0]) == 1024
+    assert len(q_vec) == 1024
+    assert mock_client.invoke_model.call_count == 3

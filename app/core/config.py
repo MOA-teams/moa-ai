@@ -23,6 +23,13 @@ class Settings(BaseSettings):
         default="global.anthropic.claude-haiku-4-5-20251001-v1:0",
         validation_alias=AliasChoices("MOA_BEDROCK_MODEL_ID", "BEDROCK_MODEL_ID"),
     )
+    bedrock_embedding_model: str = Field(
+        default="amazon.titan-embed-text-v2:0",
+        validation_alias=AliasChoices(
+            "MOA_BEDROCK_EMBEDDING_MODEL",
+            "BEDROCK_EMBEDDING_MODEL",
+        ),
+    )
     bedrock_max_tokens: int = Field(
         default=2048,
         ge=256,

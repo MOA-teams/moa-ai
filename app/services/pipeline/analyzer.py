@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 from app.core.errors import ServiceError
 from app.schemas.analysis import InquiryAnalysis
-from app.schemas.common import Category, Sender
+from app.schemas.common import Sender
 from app.schemas.pipeline import PipelineRequest
 from app.services.llm.base import StructuredLLM
 from app.services.pipeline.analysis_prompt import ANALYSIS_INSTRUCTION
@@ -15,9 +15,6 @@ CODE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 ATTACHMENT_LIMITATION = "첨부 이미지·PDF 내용은 이번 단계에서 분석하지 않았습니다."
-_PAYMENT_TERMS = ("요금", "가격", "결제", "환불", "청구", "구독료")
-_ACCOUNT_TERMS = ("비밀번호", "패스워드", "로그인", "계정 잠금", "계정 탈퇴", "2단계 인증")
-_ERROR_ACTION_TERMS = ("저장", "첨부", "업로드", "동기화", "실행", "버튼", "클릭", "결제", "로그인")
 
 
 def observed_error_codes(request: PipelineRequest) -> set[str]:
@@ -77,20 +74,7 @@ class InquiryAnalyzer:
                 )
             result.normalized_error_code = normalized
 
-        customer_text = " ".join(
-            message.text for message in request.messages if message.sender == Sender.CUSTOMER
-        )
-        if result.category == Category.USAGE and result.normalized_error_code is None:
-            if any(term in customer_text for term in _PAYMENT_TERMS):
-                result.category = Category.PAYMENT
-            elif any(term in customer_text for term in _ACCOUNT_TERMS):
-                result.category = Category.ACCOUNT
-
-        if (
-            result.normalized_error_code is not None
-            and result.needs_more_info
-            and (result.symptoms or any(term in customer_text for term in _ERROR_ACTION_TERMS))
-        ):
+        if result.normalized_error_code is not None and result.needs_more_info and result.symptoms:
             result = result.model_copy(
                 update={
                     "needs_more_info": False,
