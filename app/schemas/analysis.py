@@ -47,6 +47,7 @@ class InquiryAnalysis(Analysis):
     routing: TeamRouting | None = None
     has_action_context: bool | None = None
     context_evidence: str | None = Field(default=None, max_length=1000)
+    requires_manual_review: bool = False
 
     @field_validator("missing_fields", mode="before")
     @classmethod

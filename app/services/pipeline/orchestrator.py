@@ -3,6 +3,8 @@
 import logging
 from collections.abc import Callable
 
+from pydantic import ValidationError
+
 from app.core.errors import ServiceError
 from app.schemas.analysis import InquiryAnalysis
 from app.schemas.common import CheckStatus, DraftResult, ErrorDetail, RunStatus
@@ -28,6 +30,53 @@ RETRYABLE_ERROR_CODES = {
     "EMBEDDING_TIMEOUT",
     "EMBEDDING_CONNECTION_FAILED",
 }
+
+UNUSABLE_OUTPUT_CODES = {
+    "INVALID_LLM_RESPONSE",
+    "EMPTY_LLM_RESPONSE",
+    "INVALID_EVIDENCE_SELECTION",
+    "INVALID_DRAFT_CITATIONS",
+    "ANALYSIS_INPUT_TOO_LARGE",
+}
+
+
+def manual_result(result: PipelineResult, stage: PipelineStage | None) -> PipelineResult:
+    """A rejected output is a review outcome, never an approved draft."""
+    reason = "AI 결과의 구조나 근거를 검증하지 못했습니다. 담당자가 문의와 자료를 확인해 주세요."
+    if stage == PipelineStage.ANALYZE:
+        reason = "대화가 분석 가능한 길이를 초과해 담당자 확인이 필요합니다."
+    return result.model_copy(
+        update={
+            "analysis": result.analysis
+            or Analysis(
+                category="기타",
+                urgency="보통",
+                summary="대화가 분석 가능한 범위를 초과해 자동 분류를 보류합니다.",
+            ),
+            "run_status": RunStatus.COMPLETED,
+            "current_stage": None,
+            "draft_result": DraftResult.MANUAL,
+            "draft": None,
+            "additional_question": None,
+            "error": None,
+            "routing": TeamRouting(reason=reason),
+            "verification": Verification(
+                status=CheckStatus.UNKNOWN,
+                checks={
+                    name: CheckStatus.UNKNOWN
+                    for name in (
+                        "evidence_current",
+                        "source_conflict",
+                        "claims_supported",
+                        "internal_data_excluded",
+                        "auto_response_scope",
+                    )
+                },
+                reasons=[reason],
+                unsupported_sentences=[],
+            ),
+        }
+    )
 
 
 class PipelineOrchestrator:
@@ -92,6 +141,8 @@ class PipelineOrchestrator:
 
             # Stage 2: 정보 부족 판단
             report_stage(PipelineStage.CHECK_INFORMATION)
+            if inquiry_analysis.requires_manual_review:
+                return manual_result(result, PipelineStage.CHECK_INFORMATION)
             if inquiry_analysis.needs_more_info:
                 return result.model_copy(
                     update=dict(
@@ -247,6 +298,8 @@ class PipelineOrchestrator:
             logger.warning(
                 "Pipeline failed run=%s stage=%s code=%s", run_id, current_stage, exc.code
             )
+            if exc.code in UNUSABLE_OUTPUT_CODES:
+                return manual_result(result, current_stage)
             retryable = exc.code in RETRYABLE_ERROR_CODES
             return result.model_copy(
                 update=dict(
@@ -261,6 +314,9 @@ class PipelineOrchestrator:
                     ),
                 )
             )
+        except ValidationError:
+            logger.warning("Pipeline output invalid run=%s stage=%s", run_id, current_stage)
+            return manual_result(result, current_stage)
         except Exception as exc:
             # Never log exception messages/tracebacks containing customer or source text.
             logger.error(

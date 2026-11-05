@@ -15,7 +15,7 @@ from app.services.pipeline.drafter import (
     EvidenceEvaluationOutput,
     EvidenceValidator,
 )
-from app.services.pipeline.error_codes import extract_error_codes
+from app.services.pipeline.error_codes import extract_error_codes, resolve_reported_code
 from app.services.pipeline.orchestrator import PipelineOrchestrator
 from app.services.pipeline.similar import SimilarInquiryFinder
 
@@ -84,11 +84,11 @@ async def test_followup_http_code_is_grounded_and_normalized(pipeline_request, m
 @pytest.mark.parametrize("text", ["404원 결제 문의", "500명 사용 요금 문의", "로그인 오류가 나요"])
 async def test_hallucinated_http_code_is_still_rejected(pipeline_request, text):
     pipeline_request["messages"][0]["text"] = text
-    with pytest.raises(ServiceError) as exc:
-        await InquiryAnalyzer(StubLLM(searchable_result(normalized_error_code="HTTP-404"))).analyze(
-            PipelineRequest.model_validate(pipeline_request)
-        )
-    assert exc.value.code == "UNGROUNDED_ERROR_CODE"
+    result = await InquiryAnalyzer(
+        StubLLM(searchable_result(normalized_error_code="HTTP-404"))
+    ).analyze(PipelineRequest.model_validate(pipeline_request))
+    assert result.normalized_error_code is None
+    assert result.needs_more_info and result.search_query is None
 
 
 def test_agent_suggested_http_code_is_not_customer_evidence(pipeline_request):
@@ -221,3 +221,53 @@ async def test_late_failure_keeps_error_only_backend_contract(pipeline_request):
     assert result.analysis is None and result.routing is None
     assert result.draft is None and result.verification is None
     assert result.current_stage == "유사 문의 탐색"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "로그인하면 503이 나옵니다",
+        "503이 보여요",
+        "로그인 503 나와요",
+        "로그인할 때 503 떴어요",
+        "503 뜸",
+        "로그인 버튼을 누르면 503이 나옵니다.",
+    ],
+)
+def test_natural_status_code_reports_are_grounded(text):
+    assert "HTTP-503" in extract_error_codes(text)
+
+
+@pytest.mark.parametrize(
+    "text", ["ZX-999 오류가 떠요", "파일 업로드 시 AUTH_001 에러", "CUSTOM-FAIL-42가 표시됩니다"]
+)
+def test_unfamiliar_codes_are_preserved_only_with_error_context(text):
+    codes = extract_error_codes(text)
+    assert codes
+    assert all(resolve_reported_code(code, codes) == code for code in codes)
+
+
+@pytest.mark.parametrize(
+    "text", ["가격은 503원", "503명 요금", "문서 DOC-001 참고", "버전 4.0.4", "주문 ZX-999 확인"]
+)
+def test_numbers_and_identifiers_are_not_assumed_errors(text):
+    assert not extract_error_codes(text)
+
+
+@pytest.mark.parametrize("reply", ["401", "401이요", "401요.", "401입니다", "401예요!"])
+def test_short_followup_code_is_grounded_in_error_context(pipeline_request, reply):
+    pipeline_request["messages"][0]["text"] = "로그인 버튼을 누르면 오류가 떠요"
+    pipeline_request["messages"].append(
+        {
+            **pipeline_request["messages"][0],
+            "message_id": "MSG-000002",
+            "text": reply,
+        }
+    )
+    pipeline_request["based_on_message_id"] = "MSG-000002"
+    assert "HTTP-401" in observed_error_codes(PipelineRequest.model_validate(pipeline_request))
+
+
+def test_bare_number_without_error_context_is_not_grounded(pipeline_request):
+    pipeline_request["messages"][0]["text"] = "401이요"
+    assert not observed_error_codes(PipelineRequest.model_validate(pipeline_request))

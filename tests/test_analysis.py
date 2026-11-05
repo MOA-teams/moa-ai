@@ -154,9 +154,10 @@ def test_followup_field_aliases_are_deduplicated():
 
 async def test_invented_error_code_rejected(pipeline_request):
     llm = StubLLM(searchable_result())
-    with pytest.raises(ServiceError) as exc:
-        await InquiryAnalyzer(llm).analyze(PipelineRequest.model_validate(pipeline_request))
-    assert exc.value.code == "UNGROUNDED_ERROR_CODE"
+    result = await InquiryAnalyzer(llm).analyze(PipelineRequest.model_validate(pipeline_request))
+    assert len(llm.calls) == 2
+    assert result.normalized_error_code is None
+    assert result.needs_more_info and result.search_query is None
 
 
 @pytest.mark.parametrize("code", ["E502", "e-502", " E 502 "])
@@ -170,11 +171,11 @@ async def test_model_code_spelling_is_normalized_before_grounding(pipeline_reque
 
 async def test_model_cannot_add_code_area(pipeline_request):
     pipeline_request["messages"][0]["text"] = "저장 시 E502가 떠요"
-    with pytest.raises(ServiceError) as exc:
-        await InquiryAnalyzer(
-            StubLLM(searchable_result(normalized_error_code="E-STORAGE-502"))
-        ).analyze(PipelineRequest.model_validate(pipeline_request))
-    assert exc.value.code == "UNGROUNDED_ERROR_CODE"
+    result = await InquiryAnalyzer(
+        StubLLM(searchable_result(normalized_error_code="E-STORAGE-502"))
+    ).analyze(PipelineRequest.model_validate(pipeline_request))
+    assert result.normalized_error_code is None
+    assert result.needs_more_info and result.search_query is None
 
 
 def test_codes_normalize_only_customer_text_and_env(pipeline_request):
