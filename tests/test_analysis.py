@@ -12,6 +12,7 @@ from app.services.pipeline.analyzer import (
     InquiryAnalyzer,
     observed_error_codes,
 )
+from app.services.pipeline.orchestrator import PipelineOrchestrator
 
 
 class StubLLM:
@@ -253,10 +254,10 @@ async def test_actionable_error_code_inquiry_proceeds_to_search(pipeline_request
             normalized_error_code="E-502",
             summary="저장 버튼 클릭 시 E-502 오류 발생",
             symptoms=["저장 시 E-502 발생"],
-            needs_more_info=True,
-            missing_fields=["발생 화면", "발생 환경"],
-            additional_question="어느 화면에서 저장할 때 발생하나요?",
-            search_query=None,
+            needs_more_info=False,
+            missing_fields=[],
+            additional_question=None,
+            search_query="저장 버튼 E-502 오류",
         )
     )
     result = await InquiryAnalyzer(llm).analyze(PipelineRequest.model_validate(pipeline_request))
@@ -264,3 +265,118 @@ async def test_actionable_error_code_inquiry_proceeds_to_search(pipeline_request
     assert result.missing_fields == []
     assert result.additional_question is None
     assert result.search_query is not None and "E-502" in result.search_query
+
+
+@pytest.mark.parametrize("text,code", [("401에러 떠요", "HTTP-401"), ("E-401 오류", "E-401")])
+async def test_error_code_and_generic_symptom_do_not_override_information_question(
+    pipeline_request, text, code
+):
+    pipeline_request["messages"][0]["text"] = text
+    result = await InquiryAnalyzer(
+        StubLLM(
+            searchable_result(
+                normalized_error_code=code,
+                summary=text,
+                symptoms=[text],
+                needs_more_info=True,
+                missing_fields=["발생 화면", "재현 단계"],
+                additional_question="어떤 화면에서 무엇을 하다가 오류가 발생했나요?",
+                search_query=None,
+            )
+        )
+    ).analyze(PipelineRequest.model_validate(pipeline_request))
+    assert result.needs_more_info
+    assert result.additional_question is not None
+    assert result.search_query is None
+    assert result.missing_fields == ["발생 화면", "재현 단계"]
+
+
+async def test_code_only_inquiry_returns_question_before_search_or_human_handoff(pipeline_request):
+    class Rag:
+        async def search(self, *args, **kwargs):
+            raise AssertionError("Information gathering must precede retrieval")
+
+    pipeline_request["messages"][0]["text"] = "401에러 떠요"
+    llm = StubLLM(
+        searchable_result(
+            normalized_error_code="HTTP-401",
+            summary="401 오류",
+            symptoms=["401 오류"],
+            needs_more_info=True,
+            missing_fields=["발생 화면", "재현 단계"],
+            additional_question="어떤 화면에서 무엇을 하다가 발생했나요?",
+            search_query=None,
+        )
+    )
+    result = await PipelineOrchestrator(analyzer=InquiryAnalyzer(llm), rag=Rag()).execute(
+        PipelineRequest.model_validate(pipeline_request)
+    )
+    assert result.run_status == "완료"
+    assert result.draft_result == "추가 질문 필요"
+    assert result.additional_question is not None
+    assert result.routing.team == "판단 보류"
+    assert result.draft is None
+    assert len(llm.calls) == 1
+
+
+async def test_reported_context_prevents_unnecessary_environment_questions(pipeline_request):
+    pipeline_request["messages"][0]["text"] = "로그인 버튼을 누르면 401에러가 떠요."
+    r = await InquiryAnalyzer(
+        StubLLM(
+            searchable_result(
+                normalized_error_code="HTTP-401",
+                has_action_context=True,
+                context_evidence="로그인 버튼을 누르면",
+                needs_more_info=True,
+                missing_fields=["발생 환경", "앱 버전"],
+                additional_question="OS와 앱 버전은 무엇인가요?",
+                search_query=None,
+            )
+        )
+    ).analyze(PipelineRequest.model_validate(pipeline_request))
+    assert not r.needs_more_info
+    assert r.additional_question is None and not r.missing_fields
+    assert r.search_query
+
+
+@pytest.mark.parametrize("quote", [None, "로그인 버튼 클릭"])
+async def test_invented_action_context_does_not_skip_question(pipeline_request, quote):
+    pipeline_request["messages"][0]["text"] = "401에러 떠요"
+    r = await InquiryAnalyzer(
+        StubLLM(
+            searchable_result(
+                normalized_error_code="HTTP-401",
+                has_action_context=True,
+                context_evidence=quote,
+            )
+        )
+    ).analyze(PipelineRequest.model_validate(pipeline_request))
+    assert r.needs_more_info
+    assert r.search_query is None and r.additional_question
+
+
+async def test_prior_customer_action_context_is_reused_in_followup(pipeline_request):
+    pipeline_request["messages"][0]["text"] = "로그인 버튼을 누르면 오류가 나요."
+    pipeline_request["messages"].append(
+        dict(
+            message_id="MSG-followup",
+            sender="customer",
+            text="401에러 떠요",
+            sent_at="2026-11-05T18:01:00+09:00",
+        )
+    )
+    pipeline_request["based_on_message_id"] = "MSG-followup"
+    r = await InquiryAnalyzer(
+        StubLLM(
+            searchable_result(
+                normalized_error_code="HTTP-401",
+                has_action_context=True,
+                context_evidence="로그인 버튼을 누르면",
+                needs_more_info=True,
+                missing_fields=["재현 단계"],
+                additional_question="어떤 동작을 했나요?",
+                search_query=None,
+            )
+        )
+    ).analyze(PipelineRequest.model_validate(pipeline_request))
+    assert not r.needs_more_info and r.search_query

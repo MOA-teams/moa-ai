@@ -72,15 +72,38 @@ class InquiryAnalyzer:
             if result.search_query and normalized not in result.search_query:
                 result.search_query = f"{result.search_query} {normalized}"[:1000]
 
-        if result.normalized_error_code is not None and result.needs_more_info and result.symptoms:
-            result = result.model_copy(
-                update={
-                    "needs_more_info": False,
-                    "missing_fields": [],
-                    "additional_question": None,
-                    "search_query": f"{result.summary} {result.normalized_error_code}".strip(),
-                }
-            )
+            if result.has_action_context is not None:
+                # A reported code is not itself an action. Trust the structured
+                # context decision only when supported by a literal customer quote.
+                quote = (result.context_evidence or "").strip()
+                grounded_context = (
+                    result.has_action_context
+                    and bool(quote)
+                    and any(
+                        quote in message.text
+                        for message in request.messages
+                        if message.sender == Sender.CUSTOMER
+                    )
+                )
+                if grounded_context:
+                    result = result.model_copy(
+                        update={
+                            "needs_more_info": False,
+                            "missing_fields": [],
+                            "additional_question": None,
+                            "search_query": result.search_query
+                            or f"{result.summary} {normalized}"[:1000],
+                        }
+                    )
+                else:
+                    result = result.model_copy(
+                        update={
+                            "needs_more_info": True,
+                            "missing_fields": ["발생 화면", "재현 단계"],
+                            "additional_question": "어떤 화면에서 무엇을 하다가 오류가 발생했나요?",
+                            "search_query": None,
+                        }
+                    )
 
         if any(message.attachments for message in request.messages):
             if ATTACHMENT_LIMITATION not in result.limitations:
