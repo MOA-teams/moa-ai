@@ -32,5 +32,7 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts
           # .env 내용은 stdin으로만 전달해 커맨드라인/로그 노출을 피한다.
+          # deploy.sh 자체가 git reset으로 갱신되는 순환을 피하려고, 원격에서 먼저
+          # 최신 코드를 받은 뒤 그 스크립트를 exec로 실행한다. stdin(.env)은 그대로 전달된다.
           printf '%s' "$ENV_FILE" | ssh -i ~/.ssh/deploy_key "$SSH_USER@$SSH_HOST" \
-            'bash ~/moa-ai/scripts/deploy.sh'
+            'cd ~/moa-ai && git fetch --quiet origin main && git reset --hard --quiet origin/main && exec bash scripts/deploy.sh'
