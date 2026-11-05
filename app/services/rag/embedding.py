@@ -1,4 +1,6 @@
+import asyncio
 import math
+from collections import OrderedDict
 from typing import Literal, Protocol
 
 import httpx
@@ -26,6 +28,10 @@ def validate_vectors(vectors: list[list[float]], count: int, dimensions: int) ->
         raise ServiceError(502, "INVALID_EMBEDDING_RESPONSE", "Invalid embedding vectors")
 
 
+_QUERY_EMBEDDING_CACHE: OrderedDict[tuple[str, str], list[float]] = OrderedDict()
+_MAX_QUERY_CACHE_SIZE = 256
+
+
 class GeminiEmbedder:
     """Separate embedding model; the 3.5 text-generation model is not an embedder."""
 
@@ -41,10 +47,12 @@ class GeminiEmbedder:
     ) -> list[list[float]]:
         if not texts:
             return []
-        key = self.settings.gemini_api_key.get_secret_value()
-        if not key:
+        api_keys = self.settings.candidate_api_keys
+        if not api_keys:
             raise ServiceError(503, "GEMINI_NOT_CONFIGURED", "Set Gemini API key")
-        try:
+        max_retries = max(1, self.settings.gemini_max_retries)
+        last_error: ServiceError | None = None
+        for key_idx, key in enumerate(api_keys):
             async with genai.Client(
                 api_key=key,
                 http_options=types.HttpOptions(
@@ -52,31 +60,56 @@ class GeminiEmbedder:
                     retry_options=types.HttpRetryOptions(attempts=1),
                 ),
             ).aio as client:
-                response = await client.models.embed_content(
-                    model=self.settings.gemini_embedding_model,
-                    contents=texts,
-                    config=types.EmbedContentConfig(
-                        task_type=task,
-                        output_dimensionality=self.settings.embedding_dimensions,
-                    ),
-                )
-        except errors.APIError as exc:
-            status = exc.code if exc.code in {402, 429, 503, 504} else 502
-            raise ServiceError(
-                status, "EMBEDDING_API_ERROR", "Gemini embedding request failed"
-            ) from exc
-        except httpx.TimeoutException as exc:
-            raise ServiceError(504, "EMBEDDING_TIMEOUT", "Embedding request timed out") from exc
-        except httpx.TransportError as exc:
-            raise ServiceError(
-                502, "EMBEDDING_CONNECTION_FAILED", "Embedding connection failed"
-            ) from exc
-        vectors = [item.values or [] for item in (response.embeddings or [])]
-        validate_vectors(vectors, len(texts), self.settings.embedding_dimensions)
-        return vectors
+                for attempt in range(max_retries):
+                    try:
+                        response = await client.models.embed_content(
+                            model=self.settings.gemini_embedding_model,
+                            contents=texts,
+                            config=types.EmbedContentConfig(
+                                task_type=task,
+                                output_dimensionality=self.settings.embedding_dimensions,
+                            ),
+                        )
+                        vectors = [item.values or [] for item in (response.embeddings or [])]
+                        validate_vectors(vectors, len(texts), self.settings.embedding_dimensions)
+                        return vectors
+                    except errors.APIError as exc:
+                        status = exc.code if exc.code in {402, 429, 503, 504} else 502
+                        err = ServiceError(
+                            status, "EMBEDDING_API_ERROR", "Gemini embedding request failed"
+                        )
+                        err.__cause__ = exc
+                        last_error = err
+                        if exc.code in {402, 429}:
+                            break
+                        if exc.code not in {500, 502, 503, 504}:
+                            raise err from exc
+                    except httpx.TimeoutException as exc:
+                        err = ServiceError(504, "EMBEDDING_TIMEOUT", "Embedding request timed out")
+                        err.__cause__ = exc
+                        last_error = err
+                    except (httpx.TransportError, OSError) as exc:
+                        err = ServiceError(
+                            502, "EMBEDDING_CONNECTION_FAILED", "Embedding connection failed"
+                        )
+                        err.__cause__ = exc
+                        last_error = err
+                    if (attempt + 1 < max_retries) or (key_idx + 1 < len(api_keys)):
+                        await asyncio.sleep(0.4 * (attempt + 1))
+        assert last_error is not None
+        raise last_error
 
     async def documents(self, texts: list[str]) -> list[list[float]]:
         return await self._embed(texts, "RETRIEVAL_DOCUMENT")
 
     async def query(self, text: str) -> list[float]:
-        return (await self._embed([text], "RETRIEVAL_QUERY"))[0]
+        cache_key = (self.space, text.strip())
+        cached = _QUERY_EMBEDDING_CACHE.get(cache_key)
+        if cached is not None:
+            _QUERY_EMBEDDING_CACHE.move_to_end(cache_key)
+            return list(cached)
+        vector = (await self._embed([text], "RETRIEVAL_QUERY"))[0]
+        _QUERY_EMBEDDING_CACHE[cache_key] = list(vector)
+        if len(_QUERY_EMBEDDING_CACHE) > _MAX_QUERY_CACHE_SIZE:
+            _QUERY_EMBEDDING_CACHE.popitem(last=False)
+        return vector

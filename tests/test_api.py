@@ -35,10 +35,18 @@ def test_unknown_tenant_denied(client, headers):
     assert client.get("/internal/v1/pipeline-runs/RUN-000001", headers=headers).status_code == 403
 
 
-def test_scaffold_does_not_fake_success(client, headers, pipeline_request):
+def test_pipeline_run_submission_and_lookup(client, headers, pipeline_request):
     response = client.post("/internal/v1/pipeline-runs", json=pipeline_request, headers=headers)
-    assert response.status_code == 501
-    assert response.json()["error"]["code"] == "FEATURE_NOT_IMPLEMENTED"
+    assert response.status_code == 202
+    data = response.json()
+    assert data["run_id"].startswith("RUN-")
+    assert len(data["run_id"]) == 36
+    assert data["inquiry_id"] == "Q-1001"
+    assert data["run_status"] == "대기"
+
+    lookup = client.get(f"/internal/v1/pipeline-runs/{data['run_id']}", headers=headers)
+    assert lookup.status_code == 200
+    assert lookup.json()["run_id"] == data["run_id"]
 
 
 def test_invalid_input_does_not_echo_customer_text(client, headers, pipeline_request):

@@ -169,3 +169,47 @@ def test_stage_result_projects_to_existing_pipeline_contract():
     projected = Analysis.model_validate(result.model_dump(include=set(Analysis.model_fields)))
     assert projected.category == result.category
     assert projected.normalized_error_code == "E-502"
+
+
+@pytest.mark.parametrize(
+    "text,expected_category",
+    [
+        ("비밀번호 변경 방법을 알려주세요.", "계정"),
+        ("Pro 요금제의 월 가격을 알려주세요.", "결제"),
+    ],
+)
+async def test_category_boundaries_override_usage_for_account_and_payment(
+    pipeline_request, text, expected_category
+):
+    pipeline_request["messages"][0]["text"] = text
+    llm = StubLLM(
+        searchable_result(
+            category="이용 방법",
+            normalized_error_code=None,
+            summary=text,
+            search_query=text,
+        )
+    )
+    result = await InquiryAnalyzer(llm).analyze(PipelineRequest.model_validate(pipeline_request))
+    assert result.category.value == expected_category
+
+
+async def test_actionable_error_code_inquiry_proceeds_to_search(pipeline_request):
+    pipeline_request["messages"][0]["text"] = "저장을 누르면 E502가 떠요."
+    llm = StubLLM(
+        searchable_result(
+            category="기능 오류",
+            normalized_error_code="E-502",
+            summary="저장 버튼 클릭 시 E-502 오류 발생",
+            symptoms=["저장 시 E-502 발생"],
+            needs_more_info=True,
+            missing_fields=["발생 화면", "발생 시점"],
+            additional_question="어느 화면에서 저장할 때 발생하나요?",
+            search_query=None,
+        )
+    )
+    result = await InquiryAnalyzer(llm).analyze(PipelineRequest.model_validate(pipeline_request))
+    assert result.needs_more_info is False
+    assert result.missing_fields == []
+    assert result.additional_question is None
+    assert result.search_query is not None and "E-502" in result.search_query

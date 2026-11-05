@@ -110,6 +110,7 @@ class SearchHit(ContractModel):
     text: str
     score: float
     visibility: Literal["고객 공개", "내부 전용"]
+    metadata: dict[str, Any] = Field(default_factory=dict)
     evidence: Evidence
 
 

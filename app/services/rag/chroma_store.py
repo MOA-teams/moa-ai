@@ -206,6 +206,28 @@ class ChromaVectorStore:
                 error=record["error"],
             )
 
+    def list_current_public_sources(self, tenant: str, space: str) -> list[SourceInput]:
+        # 검색과 답변 갱신 모두 같은 최신 버전/상태/인덱싱 기준을 사용한다.
+        with self.lock:
+            return [
+                SourceInput.model_validate(record["source"])
+                for record in self._eligible_records(tenant)
+                if record["space"] == space
+                and record["source"]["visibility"] == "고객 공개"
+                and record["source"]["source_type"] in {"문서", "서비스 정보"}
+            ]
+
+    def list_sources(self, tenant: str, *, source_type: str | None = None) -> list[SourceInput]:
+        with self.lock:
+            records = self._records(tenant)
+            items: list[SourceInput] = []
+            for record in records:
+                source = record["source"]
+                if source_type is not None and source["source_type"] != source_type:
+                    continue
+                items.append(SourceInput.model_validate(source))
+            return items
+
     def update_statuses(self, batch: SourceStatusBatch) -> SourceStatusResult:
         with self.lock:
             event_key = "event:" + digest([batch.tenant_id, batch.event_id])
@@ -258,9 +280,18 @@ class ChromaVectorStore:
             self._write(batch.tenant_id, updates)
             return result
 
-    def search(self, request: SearchRequest, vector: list[float], space: str) -> SearchResult:
+    def search(
+        self,
+        request: SearchRequest,
+        vector: list[float],
+        space: str,
+        *,
+        source_types: set[str] | None = None,
+    ) -> SearchResult:
         with self.lock:
             records = [r for r in self._eligible_records(request.tenant_id) if r["space"] == space]
+            if source_types is not None:
+                records = [r for r in records if r["source"]["source_type"] in source_types]
             if request.purpose == "고객 답변":
                 records = [
                     r
@@ -309,6 +340,7 @@ class ChromaVectorStore:
                     text=text,
                     score=score,
                     visibility=source["visibility"],
+                    metadata=source.get("metadata") or {},
                     evidence=evidence,
                 )
                 if source["source_type"] == "우수 답변":

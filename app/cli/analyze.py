@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from app.core.config import get_settings
 from app.core.errors import ServiceError
 from app.schemas.pipeline import PipelineRequest
-from app.services.llm.gemini import GeminiLLM
+from app.services.llm.bedrock import create_llm
 from app.services.pipeline.analyzer import InquiryAnalyzer
 
 
@@ -23,7 +23,7 @@ async def analyze_file(path: Path) -> dict:
     if request.tenant_id not in settings.tenant_ids:
         raise ServiceError(403, "FORBIDDEN", "Tenant is not configured for this service")
     result = await InquiryAnalyzer(
-        GeminiLLM(settings), max_input_chars=settings.analysis_max_input_chars
+        create_llm(settings), max_input_chars=settings.analysis_max_input_chars
     ).analyze(request)
     return {
         "inquiry_id": request.inquiry_id,
@@ -40,6 +40,7 @@ def diagnostic_details(exc: ServiceError, elapsed: float) -> dict:
     provider_message = getattr(cause, "message", None)
     secrets = [
         settings.gemini_api_key.get_secret_value(),
+        settings.bedrock_bearer_token.get_secret_value(),
         settings.internal_token.get_secret_value(),
         settings.backend_service_token.get_secret_value(),
     ]
@@ -48,6 +49,7 @@ def diagnostic_details(exc: ServiceError, elapsed: float) -> dict:
             if secret:
                 provider_message = provider_message.replace(secret, "[REDACTED]")
         provider_message = re.sub(r"AIza[\w-]+", "[REDACTED]", provider_message)
+        provider_message = re.sub(r"ABSK[\w=-]+", "[REDACTED]", provider_message)
         provider_message = re.sub(r"(?i)(key=)[^\s&]+", r"\1[REDACTED]", provider_message)[:1500]
     else:
         provider_message = None

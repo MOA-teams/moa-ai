@@ -1,5 +1,7 @@
 # MOA AI
 
+코드 읽기 순서와 단계별 책임, 리뷰 수정 내용은 [코드 읽기 가이드](docs/CodeGuide.md)를 참고하세요.
+
 고객 문의 분석·RAG·답변 초안·별도 검수를 담당하는 FastAPI 서비스의 초기 구조입니다.
 백엔드 8000 / AI 8001로 분리하고 내부 계약은 `/internal/v1`을 사용합니다.
 
@@ -20,13 +22,15 @@ AI 저장소는 PostgreSQL에 직접 접속하거나 테이블을 생성/변경�
 - 공식 `google-genai` SDK 기반 비동기 Gemini 구조화 JSON 어댑터.
 - 고정된 백엔드 주소로 결과를 전달하는 콜백 클라이언트와 제한된 재시도.
 - Chroma 문서 분할·Gemini 임베딩·검색·출처 반환·유효성 필터, 자료 등록/상태 API.
-- 로컬 테스트용 문의 분석 → RAG 검색 preview API, 테스트·CI.
-
-첫 기능인 문의 분석·정보 부족 판단은 구현되어 아래 실행 도구로 확인할 수 있습니다.
-전체 파이프라인 실행·결과 저장·콜백 연결·초안 생성·별도 검수는 아직 구현 전입니다.
-`pipeline-runs`의 정식 실행·조회만 현재 **501 FEATURE_NOT_IMPLEMENTED**를 반환합니다.
-RAG 자료 등록/상태 조회/무효화는 실제 Chroma에 연결되어 있습니다.
-Gemini 어댑터는 문의 분석 실행 도구와 로컬 preview API에 연결되어 있습니다. 정식 파이프라인 HTTP 라우트는 후속 구현 대상입니다.
+- 7단계 파이프라인 오케스트레이터(`ANALYZE` → `CHECK_INFORMATION` → `FIND_SIMILAR` → `RETRIEVE` → `VALIDATE_EVIDENCE` → `GENERATE_DRAFT` → `REVIEW`):
+  - 근거 검증(`app/services/pipeline/drafter.py`): 공개 사실 근거 유무·오류 코드 일치·버전 충돌 검증.
+  - 답변 초안 생성(`app/services/pipeline/drafter.py`): 현재 유효 문서(`facts`)만 사실 근거로 사용하고 우수 답변(`style_examples`)은 표현 참고로 분리.
+  - 별도 검수(`app/services/pipeline/reviewer.py`): 초안 생성과 분리된 LLM 검수 및 내부 코드/함수명 유출 차단 정규식 가드레일.
+  - 유사 문의 탐색(`app/services/pipeline/similar.py`): Chroma의 `"문의 요약"` 소스를 검색해 후보 및 그룹을 제안하며 서로 다른 오류 코드(E-502/E-413/E-401) 간 오병합을 차단.
+- 정식 `POST /internal/v1/pipeline-runs` (202 접수·비동기 실행·콜백 전달) 및 `GET /internal/v1/pipeline-runs/{run_id}` (상태·결과 조회·복구), `Idempotency-Key` 멱등 처리 및 오래된 `inquiry_revision` 콜백 차단.
+  - 주의: 백엔드 영속 저장소(PostgreSQL) 연동 전까지 `PipelineRunStore`는 프로세스 내 인메모리 저장소로 동작하므로 서버 재시작 시 실행 기록이 초기화됩니다.
+- 문서/코드 변경에 따른 기존 답변 영향 판별·수정안 생성·별도 검수(`app/services/pipeline/revision.py`) 및 오탐 방지(문서 버전이 올라도 해당 답변의 사실이 동일하면 수정 대상에서 제외).
+- 로컬 테스트용 preview API(`POST /internal/v1/pipeline-preview`, `POST /internal/v1/answer-revision-preview`), 테스트·CI.
 
 ## 실행
 
@@ -117,7 +121,7 @@ Chroma는 `.data/chroma`에 저장하고 Git에서 제외합니다. 별도 Postg
 
 preview는 `MOA_ENABLE_PREVIEW=true`인 로컬 개발 환경에서만 노출합니다.
 저장된 문서가 없거나 주제와 맞지 않으면 facts가 빈 배열일 수 있습니다. 답변을 지어내서 채우지 않습니다.
-preview는 초안 생성·고객 발송·백엔드 콜백을 실행하지 않습니다.
+`POST /internal/v1/pipeline-preview`는 기본적으로 백엔드 콜백 없이 분석·검색까지만 실행하며, `?full_pipeline=true` 쿼리를 붙이면 근거 검증·초안 생성·별도 검수까지 로컬에서 미리 확인할 수 있습니다. 문서 개정에 따른 기존 답변 수정안 미리보기는 `POST /internal/v1/answer-revision-preview`로 테스트할 수 있습니다.
 
 자료 변경 테스트는 `POST /internal/v1/rag/source-statuses`로 review_required=true를 설정하고 검색에서 빠지는지 확인합니다.
 같은 소스의 상태 변경은 source_revision을 올리고 event_id를 새로 사용합니다. 중복 이벤트는 재적용하지 않습니다.
@@ -126,7 +130,6 @@ preview는 초안 생성·고객 발송·백엔드 콜백을 실행하지 않습
 내부 코드/자료는 고객 답변 검색에 포함하지 않습니다. 코드 커밋의 활성 상태는 백엔드가 source-statuses로 전달해야 합니다.
 
 검색 점수는 정답 확률이 아닙니다. 기본 임계값 0.5는 시작값이며 실데이터로 조정해야 합니다.
-현재 반환은 검색 후보이며 근거 충돌 검증·초안 생성은 다음 단계입니다.
 로컬 Chroma의 상태 변경은 단일 프로세스 잠금과 일괄 쓰기를 사용합니다. 다중 worker에서의 원자성을 주장하지 않습니다.
 서버 종료/재시작 중 대기했던 인덱싱은 같은 source 요청을 다시 보내 재실행합니다. 내구성 큐 복구는 아직 없습니다.
 
@@ -162,8 +165,8 @@ Gemini 무료 사용 가능 여부·한도는 선택 모델/계정의 현재 조
 | GET /internal/v1/rag/sources/{source_id}/versions/{version} | 소스 상태 조회 |
 
 공통 헤더: `Authorization: Bearer <service token>`, `X-Tenant-ID: syncnote`.
-실행 요청은 `Idempotency-Key` 필수. 멱등 처리와 실행 상태 저장은 백엔드 연동을 포함한 후속 구현입니다.
-백엔드 콜백 수신 경로: `POST /internal/v1/pipeline-results`.
+실행 요청은 `Idempotency-Key` 필수(동일 키·동일 본문은 기존 `run_id` 반환, 동일 키·다른 본문은 `409 IDEMPOTENCY_CONFLICT`). 실행 상태와 멱등키 저장은 현재 프로세스 내 인메모리(`PipelineRunStore`)로 동작하며, 재시작 시 초기화됩니다(영속 워커/DB 저장은 백엔드 계약 연결 대상).
+백엔드 콜백 수신 경로: `POST /internal/v1/pipeline-results`. 콜백 전달이 실패해도 AI 내부 실행 결과(`run_status=완료/실패`)는 유지되어 `GET /internal/v1/pipeline-runs/{run_id}`로 복구 조회할 수 있습니다.
 
 ## 검증
 

@@ -154,3 +154,111 @@ async def test_gemini_errors_are_sanitized(settings, monkeypatch, status, expect
         await GeminiLLM(settings).generate(instruction="rules", data="query", schema=Answer)
     assert exc.value.code == expected
     assert "sensitive-test-key" not in exc.value.message
+
+
+async def test_gemini_retries_503_and_falls_back_to_next_model(settings, monkeypatch):
+    from google.genai import errors
+
+    settings.gemini_api_key = SecretStr("test-key")
+    settings.gemini_model = "primary-model"
+    settings.gemini_fallback_models = "fallback-model"
+    settings.gemini_max_retries = 2
+    called_models = []
+
+    class FakeClient:
+        async def __aenter__(self):
+            self.models = self
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def generate_content(self, **kwargs):
+            model = kwargs["model"]
+            called_models.append(model)
+            if model == "primary-model":
+                raise errors.APIError(503, {"error": {"message": "High demand"}})
+            return SimpleNamespace(text='{"summary":"recovered-by-fallback"}')
+
+    monkeypatch.setattr(
+        "app.services.llm.gemini.genai.Client",
+        lambda **kwargs: SimpleNamespace(aio=FakeClient()),
+    )
+    result = await GeminiLLM(settings).generate(instruction="rules", data="query", schema=Answer)
+    assert result.summary == "recovered-by-fallback"
+    assert called_models == ["primary-model", "primary-model", "fallback-model"]
+
+
+async def test_gemini_429_switches_immediately_to_next_model_and_rotates_keys(
+    settings, monkeypatch
+):
+    from google.genai import errors
+
+    settings.gemini_api_key = SecretStr("exhausted-key,active-key")
+    settings.gemini_model = "quota-exceeded-model"
+    settings.gemini_fallback_models = "healthy-model"
+    settings.gemini_max_retries = 2
+    attempts = []
+
+    class FakeClient:
+        def __init__(self, api_key: str):
+            self.api_key = api_key
+
+        async def __aenter__(self):
+            self.models = self
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def generate_content(self, **kwargs):
+            model = kwargs["model"]
+            attempts.append((self.api_key, model))
+            if self.api_key == "exhausted-key" or model == "quota-exceeded-model":
+                raise errors.APIError(429, {"error": {"message": "Quota exceeded"}})
+            return SimpleNamespace(text='{"summary":"ok-from-second-key-and-model"}')
+
+    monkeypatch.setattr(
+        "app.services.llm.gemini.genai.Client",
+        lambda **kwargs: SimpleNamespace(aio=FakeClient(kwargs["api_key"])),
+    )
+    result = await GeminiLLM(settings).generate(instruction="rules", data="query", schema=Answer)
+    assert result.summary == "ok-from-second-key-and-model"
+    assert attempts == [
+        ("exhausted-key", "quota-exceeded-model"),
+        ("exhausted-key", "healthy-model"),
+        ("active-key", "quota-exceeded-model"),
+        ("active-key", "healthy-model"),
+    ]
+
+
+async def test_bedrock_llm_parses_code_fenced_json_and_auto_fallback_works(settings, monkeypatch):
+    from app.services.llm.bedrock import BedrockLLM, create_llm
+
+    seen = {}
+
+    class FakeBedrockClient:
+        def converse(self, **kwargs):
+            seen.update(kwargs)
+            return {
+                "output": {
+                    "message": {
+                        "content": [
+                            {"text": '```json\n{"summary": "from-bedrock-haiku"}\n```'},
+                        ]
+                    }
+                }
+            }
+
+    monkeypatch.setattr(
+        "app.services.llm.bedrock.boto3.client", lambda *a, **kw: FakeBedrockClient()
+    )
+    settings.llm_provider = "bedrock"
+    settings.bedrock_model_id = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+
+    llm = create_llm(settings)
+    assert isinstance(llm, BedrockLLM)
+    ans = await llm.generate(instruction="classify", data="input text", schema=Answer)
+    assert ans.summary == "from-bedrock-haiku"
+    assert seen["modelId"] == "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    assert seen["inferenceConfig"]["temperature"] == 0

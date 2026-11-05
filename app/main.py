@@ -21,6 +21,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = config
     app.state.rag_service = None
     app.state.inquiry_analyzer = None
+    app.state.pipeline_store = None
+    app.state.pipeline_orchestrator = None
+    app.state.backend_client = None
+    app.state.callback_http_client = None
     app.dependency_overrides[get_settings] = lambda: config
     register_error_handlers(app)
     app.include_router(api_router)

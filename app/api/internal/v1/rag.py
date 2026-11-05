@@ -50,7 +50,7 @@ async def update_statuses(
 
 
 @router.get(
-    "/sources/{source_id}/versions/{version}",
+    "/sources/{source_id:path}/versions/{version}",
     response_model=SourceView,
     summary="임베딩 완료·실패·검색 가능 여부 조회",
 )

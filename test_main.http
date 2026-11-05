@@ -1,12 +1,16 @@
-### Liveness (backend: 8000, AI: 8001)
-GET http://localhost:8001/health
+### MOA 로컬 테스트
+# Swagger: http://127.0.0.1:8001/docs
+# HTTP 클라이언트의 service_token 변수에 .env의 MOA_INTERNAL_TOKEN 값을 설정하세요.
+# Gemini API 키를 넣는 곳이 아닙니다. 실제 토큰을 이 파일에 저장하지 마세요.
+# X-Tenant-ID와 본문의 tenant_id는 모두 syncnote입니다.
 
-### Internal API contract (501 until pipeline implementation)
-# Set service_token in your local HTTP client; do not commit credentials.
-POST http://localhost:8001/internal/v1/pipeline-runs
+### 1. 서버 상태
+GET http://127.0.0.1:8001/health
+
+### 2. 문의 분석 + RAG 검색 (true이면 초안/검수까지)
+POST http://127.0.0.1:8001/internal/v1/pipeline-preview?full_pipeline=true
 Authorization: Bearer {{service_token}}
 X-Tenant-ID: syncnote
-Idempotency-Key: initial-example-001
 Content-Type: application/json
 
 {
@@ -15,7 +19,60 @@ Content-Type: application/json
   "inquiry_revision": 1,
   "based_on_message_id": "MSG-000001",
   "customer_category": "기타",
-  "messages": [{"message_id": "MSG-000001", "sender": "customer", "text": "저장할 때 E502가 떠요.", "sent_at": "2026-11-04T22:00:00+09:00", "attachments": []}],
-  "env": {"os": "iOS 18", "app_version": "2.4.0", "error_code": null},
+  "messages": [
+    {
+      "message_id": "MSG-000001",
+      "sender": "customer",
+      "text": "저장 버튼을 누르면 E502가 떠요.",
+      "sent_at": "2026-11-05T09:00:00+09:00",
+      "attachments": []
+    }
+  ],
+  "env": {
+    "os": null,
+    "app_version": null,
+    "error_code": null
+  },
   "review_only": false
 }
+
+### 3. 정식 비동기 실행: 즉시 202와 run_id 반환
+# 같은 내용 재전송은 같은 키, 내용을 바꾸면 새로운 Idempotency-Key를 사용하세요.
+POST http://127.0.0.1:8001/internal/v1/pipeline-runs
+Authorization: Bearer {{service_token}}
+X-Tenant-ID: syncnote
+Idempotency-Key: local-save-error-001
+Content-Type: application/json
+
+{
+  "tenant_id": "syncnote",
+  "inquiry_id": "Q-1001",
+  "inquiry_revision": 1,
+  "based_on_message_id": "MSG-000001",
+  "customer_category": "기타",
+  "messages": [
+    {
+      "message_id": "MSG-000001",
+      "sender": "customer",
+      "text": "저장 버튼을 누르면 E502가 떠요.",
+      "sent_at": "2026-11-05T09:00:00+09:00",
+      "attachments": []
+    }
+  ],
+  "env": {
+    "os": null,
+    "app_version": null,
+    "error_code": null
+  },
+  "review_only": false
+}
+
+### 4. 실행 결과 조회: run_id 변수를 3번 응답의 값으로 설정하세요.
+GET http://127.0.0.1:8001/internal/v1/pipeline-runs/{{run_id}}
+Authorization: Bearer {{service_token}}
+X-Tenant-ID: syncnote
+
+### 5. 테스트 근거 문서 상태
+GET http://127.0.0.1:8001/internal/v1/rag/sources/DOC-005/versions/1?source_type=문서
+Authorization: Bearer {{service_token}}
+X-Tenant-ID: syncnote

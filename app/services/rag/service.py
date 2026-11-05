@@ -63,8 +63,28 @@ class RagService:
     async def update_statuses(self, batch: SourceStatusBatch) -> SourceStatusResult:
         return await asyncio.to_thread(self.store.update_statuses, batch)
 
-    async def search(self, request: SearchRequest) -> SearchResult:
+    async def search(
+        self, request: SearchRequest, *, source_types: set[str] | None = None
+    ) -> SearchResult:
         if not request.query.strip():
             raise ServiceError(400, "EMPTY_QUERY", "Query is blank")
         vector = await self.embedder.query(request.query)
+        if source_types is not None:
+            return await asyncio.to_thread(
+                self.store.search,
+                request,
+                vector,
+                self.embedder.space,
+                source_types=source_types,
+            )
         return await asyncio.to_thread(self.store.search, request, vector, self.embedder.space)
+
+    async def list_sources(
+        self, tenant: str, *, source_type: str | None = None
+    ) -> list[SourceInput]:
+        return await asyncio.to_thread(self.store.list_sources, tenant, source_type=source_type)
+
+    async def list_current_public_sources(self, tenant: str) -> list[SourceInput]:
+        return await asyncio.to_thread(
+            self.store.list_current_public_sources, tenant, self.embedder.space
+        )
